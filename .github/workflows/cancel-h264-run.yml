@@ -1,4 +1,4 @@
-name: Cancel old H264 worker
+name: Cancel H264 worker
 
 on:
   push:
@@ -15,12 +15,23 @@ jobs:
   cancel:
     runs-on: ubuntu-latest
     steps:
-      - name: Cancel old Der Lorax run
+      - name: Cancel requested H264 run
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          code=$(curl -sS -o /tmp/cancel-response.txt -w '%{http_code}'             -X POST             -H "Accept: application/vnd.github+json"             -H "Authorization: Bearer $GH_TOKEN"             -H "X-GitHub-Api-Version: 2022-11-28"             "https://api.github.com/repos/nikl223-ctrl/LibreMediaConverter/actions/runs/37236729534/cancel")
+          run_id=$(tr -dc '0-9' < cancel-h264-run.txt)
+          if [ -z "$run_id" ]; then
+            echo "::error::No run id found."
+            exit 1
+          fi
+          echo "Cancelling run $run_id"
+          code=$(curl -sS -o /tmp/cancel-response.txt -w '%{http_code}' \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/$run_id/cancel")
           echo "GitHub cancel HTTP status: $code"
           if [ "$code" != "202" ] && [ "$code" != "409" ]; then
             cat /tmp/cancel-response.txt
