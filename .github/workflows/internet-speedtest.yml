@@ -1,0 +1,39 @@
+name: Internet Speedtest
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "speedtest-request.txt"
+  workflow_dispatch:
+
+jobs:
+  speedtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Show runner network and CPU
+        run: |
+          echo "=== Runner ==="
+          uname -a
+          echo
+          lscpu | grep -E 'Model name|CPU\(s\)|Thread|Core|Socket' || true
+          echo
+          echo "=== Public IP ==="
+          curl -4 -s --max-time 10 https://api.ipify.org || true
+          echo
+
+      - name: Install speedtest
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y speedtest-cli
+
+      - name: Run internet speedtest
+        run: |
+          echo "=============================================="
+          echo "INTERNET SPEEDTEST"
+          echo "=============================================="
+          speedtest-cli --secure --simple
+          echo "=============================================="
