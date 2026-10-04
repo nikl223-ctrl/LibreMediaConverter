@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 350
 
     env:
-      RCLONE_CONFIG: ${{ runner.temp }}/rclone.conf
+      RCLONE_CONFIG: /tmp/rclone.conf
       MAX_OUTPUT_BYTES: "10000000000"
       TARGET_BYTES: "9000000000"
 
