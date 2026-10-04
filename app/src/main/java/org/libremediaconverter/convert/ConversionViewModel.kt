@@ -42,7 +42,7 @@ import java.util.UUID
 /** User-chosen conversion settings. */
 data class ConversionSettings(
     val spec: OutputSpec = OutputFormat.MP4_H265.spec,
-    val quality: QualityTier = QualityTier.FAST,
+    val quality: QualityTier = QualityTier.FOUR_K_10_GB,
     val enginePreference: EnginePreference = EnginePreference.AUTO,
 ) {
     /** The preset this spec corresponds to, or null once it has been edited past all of them. */
@@ -440,7 +440,16 @@ class ConversionViewModel @JvmOverloads constructor(
 
     fun applySuggestion(spec: OutputSpec) = _settings.update { it.copy(spec = spec) }
 
-    fun setQuality(quality: QualityTier) = _settings.update { it.copy(quality = quality) }
+    fun setQuality(quality: QualityTier) = _settings.update {
+        if (quality == QualityTier.FOUR_K_10_GB) {
+            it.copy(
+                spec = OutputFormat.MP4_H265.spec,
+                quality = quality,
+            )
+        } else {
+            it.copy(quality = quality)
+        }
+    }
     fun setEnginePreference(preference: EnginePreference) = _settings.update { it.copy(enginePreference = preference) }
 
     /**
