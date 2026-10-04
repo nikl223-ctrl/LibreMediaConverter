@@ -188,6 +188,10 @@ enum class OutputFormat(val label: String, val spec: OutputSpec) {
  * exposed by any Android hardware encoder.
  */
 enum class QualityTier(val label: String, val description: String) {
+    FOUR_K_10_GB(
+        "4K · max 10 GB",
+        "Upscales to 3840×2160 HEVC and automatically limits the target size to safely below 10 GB.",
+    ),
     FAST("Fast", "Hardware accelerated. Best for sharing and batches."),
     BEST("Best quality", "Software encode with CRF. Slower, smaller files."),
 }
