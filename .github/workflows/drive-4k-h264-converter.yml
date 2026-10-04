@@ -203,9 +203,42 @@ jobs:
 
           echo "============================================================"
           echo "LIVE H.264 ENCODE — updates roughly every 10 seconds"
-          echo "Look for: FFMPEG LIVE | percent | FPS | Speed | Video | ETA"
-          echo "rclone lines show the current Drive upload throughput"
           echo "============================================================"
+
+          progress_fifo="$RUNNER_TEMP/ffmpeg-progress.fifo"
+          rm -f "$progress_fifo"
+          mkfifo "$progress_fifo"
+
+          stdbuf -oL awk -F= -v dur="$SOURCE_DURATION" '
+            function fmt(sec, h,m,s) {
+              if (sec < 0) sec=0
+              h=int(sec/3600)
+              m=int((sec%3600)/60)
+              s=int(sec%60)
+              return sprintf("%02d:%02d:%02d",h,m,s)
+            }
+            $1=="frame" { frame=$2; next }
+            $1=="fps" { fps=$2; next }
+            $1=="out_time" {
+              out=$2
+              n=split(out,a,":")
+              if (n==3) pos=(a[1]*3600)+(a[2]*60)+a[3]
+              next
+            }
+            $1=="speed" { speed=$2; next }
+            $1=="progress" {
+              sf=speed
+              gsub(/x/,"",sf)
+              sf+=0
+              pct=(dur>0 ? (pos/dur)*100 : 0)
+              if (pct>100) pct=100
+              eta=(sf>0 && dur>pos ? (dur-pos)/sf : 0)
+              printf("LIVE | %5.1f%% | FPS=%s | SPEED=%s | VIDEO=%s | ETA=%s\n", pct, fps, speed, out, fmt(eta))
+              fflush()
+              next
+            }
+          ' < "$progress_fifo" &
+          progress_pid=$!
 
           set +e
 
@@ -214,7 +247,7 @@ jobs:
             -loglevel warning \
             -nostats \
             -stats_period 10 \
-            -progress pipe:2 \
+            -progress "$progress_fifo" \
             -i "$INPUT_FILE" \
             -map 0:v:0 -map '0:a?' \
             -vf "scale=3840:2160:force_original_aspect_ratio=decrease,pad=3840:2160:(ow-iw)/2:(oh-ih)/2,setsar=1" \
@@ -230,44 +263,19 @@ jobs:
             -b:a 192k \
             -movflags +frag_keyframe+empty_moov+default_base_moof \
             -f mp4 pipe:1 \
-            2> >(awk -F= -v dur="$SOURCE_DURATION" '
-              function fmt(sec, h,m,s) {
-                if (sec < 0) sec=0
-                h=int(sec/3600)
-                m=int((sec%3600)/60)
-                s=int(sec%60)
-                return sprintf("%02d:%02d:%02d",h,m,s)
-              }
-              $1=="frame" { frame=$2; next }
-              $1=="fps" { fps=$2; next }
-              $1=="out_time" {
-                out=$2
-                n=split(out,a,":")
-                if (n==3) pos=(a[1]*3600)+(a[2]*60)+a[3]
-                next
-              }
-              $1=="speed" { speed=$2; next }
-              $1=="progress" {
-                sf=speed
-                gsub(/x/,"",sf)
-                sf+=0
-                pct=(dur>0 ? (pos/dur)*100 : 0)
-                if (pct>100) pct=100
-                eta=(sf>0 && dur>pos ? (dur-pos)/sf : 0)
-                printf("FFMPEG LIVE | %5.1f%% | FPS: %s | Speed: %s | Video: %s | ETA: %s\n", pct, fps, speed, out, fmt(eta))
-                fflush()
-                next
-              }
-              { print "[ffmpeg] " $0; fflush() }
-            ') \
+            2> >(stdbuf -oL sed -u 's/^/[ffmpeg] /' >&2) \
           | rclone rcat "drive:$dest_path" \
               --drive-chunk-size 64M \
               --stats 10s \
               --stats-one-line \
+              --stats-log-level NOTICE \
+              --log-level NOTICE \
               --retries 5 \
               --low-level-retries 20
 
           pipe_status=( "${PIPESTATUS[@]}" )
+          wait "$progress_pid" >/dev/null 2>&1 || true
+          rm -f "$progress_fifo"
           set -e
 
           ffmpeg_status="${pipe_status[0]:-1}"
