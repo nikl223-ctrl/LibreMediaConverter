@@ -1,0 +1,19 @@
+name: CPU Probe
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "cpu-probe.txt"
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Show CPU
+        run: |
+          echo "=== lscpu ==="
+          lscpu
+          echo "=== /proc/cpuinfo model names ==="
+          grep -m 4 '^model name' /proc/cpuinfo || true
