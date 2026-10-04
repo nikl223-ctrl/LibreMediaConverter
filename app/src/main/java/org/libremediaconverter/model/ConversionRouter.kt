@@ -136,6 +136,13 @@ object ConversionRouter {
             return Decision(Engine.MEDIA3, Reason.REMUX_NO_REENCODE)
         }
 
+        // The custom 4K/10 GB mode needs an exact 3840×2160 scale/pad filter and a
+        // duration-derived average bitrate. Keep it on FFmpeg so the size rule is
+        // deterministic across Android vendors instead of depending on MediaCodec quirks.
+        if (request.quality == QualityTier.FOUR_K_10_GB) {
+            return Decision(Engine.FFMPEG, Reason.FOUR_K_SIZE_PRESET)
+        }
+
         // CRF and two-pass are the whole point of the quality tier, and MediaCodec
         // exposes neither, so BEST always means software encoding.
         if (request.quality == QualityTier.BEST) {
@@ -193,6 +200,7 @@ object ConversionRouter {
         NO_PLATFORM_DECODER("This device cannot decode the input in hardware"),
         NO_HARDWARE_ENCODER("This device has no hardware encoder for that codec"),
         IMAGE_OUTPUT("Image output needs FFmpeg"),
+        FOUR_K_SIZE_PRESET("4K 3840×2160 with automatic max-10-GB bitrate"),
         QUALITY_TIER_REQUIRES_CRF("Best quality uses software encoding"),
         USER_FORCED_SOFTWARE("Software encoding was requested"),
         MEDIA3_FAILED("Hardware conversion failed; retrying in software"),
