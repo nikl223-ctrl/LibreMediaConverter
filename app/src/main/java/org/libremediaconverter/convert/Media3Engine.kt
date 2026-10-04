@@ -7,20 +7,27 @@ import android.os.HandlerThread
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.effect.Presentation
+import androidx.media3.transformer.AudioEncoderSettings
 import androidx.media3.transformer.Composition
+import androidx.media3.transformer.DefaultEncoderFactory
 import androidx.media3.transformer.EditedMediaItem
+import androidx.media3.transformer.Effects
 import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.ProgressHolder
 import androidx.media3.transformer.Transformer
+import androidx.media3.transformer.VideoEncoderSettings
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.suspendCancellableCoroutine
 import org.libremediaconverter.model.AudioCodec
 import org.libremediaconverter.model.AudioPlan
 import org.libremediaconverter.model.ConversionPlan
 import org.libremediaconverter.model.ConversionRequest
+import org.libremediaconverter.ffmpeg.FFmpegCommandBuilder
 import org.libremediaconverter.model.CopyPlanner
+import org.libremediaconverter.model.QualityTier
 import org.libremediaconverter.model.VideoCodec
 import org.libremediaconverter.model.VideoPlan
 import java.io.File
@@ -66,7 +73,7 @@ class Media3Engine(private val context: Context) : HardwareTranscoder {
         request: ConversionRequest,
         onProgress: (Int) -> Unit,
     ): Unit = suspendCancellableCoroutine { cont ->
-        val plan = CopyPlanner.plan(request.spec, request.probe)
+        val plan = effectivePlan(request)
         handler.post {
             // One guard around the whole body, deliberately.
             //
@@ -79,7 +86,7 @@ class Media3Engine(private val context: Context) : HardwareTranscoder {
             // ("Audio and video cannot both be removed"), which a queued job can still carry.
             // Widening the guard costs nothing on success and turns every such refusal into a
             // failed job with a reason.
-            runCatching { startExport(input, output, plan, cont, onProgress) }
+            runCatching { startExport(input, output, request, plan, cont, onProgress) }
                 .onFailure { if (cont.isActive) cont.resumeWithException(it) }
         }
     }
@@ -94,19 +101,37 @@ class Media3Engine(private val context: Context) : HardwareTranscoder {
     private fun startExport(
         input: Uri,
         output: File,
+        request: ConversionRequest,
         plan: ConversionPlan,
         cont: CancellableContinuation<Unit>,
         onProgress: (Int) -> Unit,
     ) {
-        val transformer = buildTransformer(plan, cont)
+        val transformer = buildTransformer(plan, request, cont)
 
         // Dropping the tracks the target does not have is what stops an audio-only export
-        // from carrying a re-encoded video track. Without setRemoveVideo, asking for M4A
-        // produced an HEVC stream in a file named .m4a.
-        val item = EditedMediaItem.Builder(MediaItem.fromUri(input))
+        // from carrying a re-encoded video track. The 4K preset also adds a GPU-backed
+        // Presentation effect so the encoder receives an exact UHD 3840×2160 surface while
+        // preserving the source aspect ratio with letter/pillar boxing.
+        val itemBuilder = EditedMediaItem.Builder(MediaItem.fromUri(input))
             .setRemoveVideo(plan.video == VideoPlan.Drop)
             .setRemoveAudio(plan.audio == AudioPlan.Drop)
-            .build()
+
+        if (request.quality == QualityTier.FOUR_K_10_GB && plan.video is VideoPlan.Encode) {
+            itemBuilder.setEffects(
+                Effects(
+                    emptyList(),
+                    listOf(
+                        Presentation.createForWidthAndHeight(
+                            3840,
+                            2160,
+                            Presentation.LAYOUT_SCALE_TO_FIT,
+                        ),
+                    ),
+                ),
+            )
+        }
+
+        val item = itemBuilder.build()
 
         // A Composition is the only way to ask for transmuxing; the plain
         // start(EditedMediaItem, path) overload always re-encodes. This is the remux path.
@@ -132,7 +157,11 @@ class Media3Engine(private val context: Context) : HardwareTranscoder {
      *   is supposed to have sent such a job to FFmpeg — so it fails loudly instead of quietly
      *   writing MP4, which is what the old code did.
      */
-    private fun buildTransformer(plan: ConversionPlan, cont: CancellableContinuation<Unit>): Transformer {
+    private fun buildTransformer(
+        plan: ConversionPlan,
+        request: ConversionRequest,
+        cont: CancellableContinuation<Unit>,
+    ): Transformer {
         val muxerFactory = requireNotNull(Media3Muxers.factoryFor(plan.container)) {
             "Media3 cannot mux ${plan.container}; this job should have routed to FFmpeg."
         }
@@ -140,6 +169,26 @@ class Media3Engine(private val context: Context) : HardwareTranscoder {
         val builder = Transformer.Builder(context)
             .setLooper(thread.looper)
             .setMuxerFactory(muxerFactory)
+
+        if (request.quality == QualityTier.FOUR_K_10_GB && plan.video is VideoPlan.Encode) {
+            val bitrateBps = FFmpegCommandBuilder.fourKVideoBitrateKbps(request.probe.durationMs) * 1_000
+            val encoderFactory = DefaultEncoderFactory.Builder(context)
+                // Exact 3840×2160 matters more than silently falling back to 1080p. A codec that
+                // cannot take UHD will throw here and the worker's existing fallback runs x265.
+                .setEnableFallback(false)
+                .setRequestedVideoEncoderSettings(
+                    VideoEncoderSettings.Builder()
+                        .setBitrate(bitrateBps)
+                        .build(),
+                )
+                .setRequestedAudioEncoderSettings(
+                    AudioEncoderSettings.Builder()
+                        .setBitrate(192_000)
+                        .build(),
+                )
+                .build()
+            builder.setEncoderFactory(encoderFactory)
+        }
 
         // Name a MIME type only for a track that is actually being encoded. Setting one for a
         // transmuxed track contradicts setTransmuxVideo/Audio, and setting one for a removed
@@ -187,6 +236,17 @@ class Media3Engine(private val context: Context) : HardwareTranscoder {
 
     override fun close() {
         thread.quitSafely()
+    }
+
+    /**
+     * The normal copy planner is allowed to transmux a matching HEVC stream when only the
+     * container changes. That is correct for ordinary conversions, but not for the custom 4K
+     * preset: scaling and target-size rate control both require a real encode.
+     */
+    private fun effectivePlan(request: ConversionRequest): ConversionPlan {
+        val plan = CopyPlanner.plan(request.spec, request.probe)
+        if (request.quality != QualityTier.FOUR_K_10_GB || plan.video == VideoPlan.Drop) return plan
+        return plan.copy(video = VideoPlan.Encode(VideoCodec.H265))
     }
 
     /**

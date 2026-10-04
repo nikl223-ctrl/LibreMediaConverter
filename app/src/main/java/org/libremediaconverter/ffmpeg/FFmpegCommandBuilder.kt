@@ -38,7 +38,7 @@ object FFmpegCommandBuilder {
     // The user's ceiling is 10 GB. Aim at 9.3 GB instead of riding the limit so
     // container overhead and encoder rate-control variance cannot accidentally push
     // an otherwise valid conversion above the requested maximum.
-    private const val FOUR_K_TARGET_BYTES = 9_300_000_000L
+    private const val FOUR_K_TARGET_BYTES = 9_000_000_000L
     private const val FOUR_K_AUDIO_BITRATE_BPS = 192_000L
     private const val FOUR_K_DEFAULT_VIDEO_BITRATE_KBPS = 12_000
     private const val FOUR_K_MIN_VIDEO_BITRATE_KBPS = 500

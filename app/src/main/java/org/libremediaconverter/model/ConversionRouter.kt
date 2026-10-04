@@ -119,14 +119,26 @@ object ConversionRouter {
         }
 
         // Media3 does not bundle ExoPlayer's software decoders, so an input codec with
-        // no platform decoder cannot be read at all. The dav1d extension does not
-        // rescue this: Transformer ignores bundled software decoder modules.
-        //
-        // Only relevant for a track being re-encoded — a stream copy never decodes, which is
-        // precisely why remuxing an exotic codec into a new container still works on hardware.
+        // no platform decoder cannot be read at all. The 4K preset always re-encodes video,
+        // even when the source is already HEVC in another container, because scaling and the
+        // size cap both require decoded frames.
         val inputCodec = request.probe.videoCodec
-        if (videoEncode != null && inputCodec != null && !device.canDecode(inputCodec)) {
+        val fourKReencode = request.quality == QualityTier.FOUR_K_10_GB && request.probe.hasVideo
+        if ((videoEncode != null || fourKReencode) && inputCodec != null && !device.canDecode(inputCodec)) {
             return Decision(Engine.FFMPEG, Reason.NO_PLATFORM_DECODER)
+        }
+
+        // The 4K/10 GB preset is deliberately hardware-first. Media3's default encoder selector
+        // prefers hardware encoders when the device exposes one, so on Exynos/Snapdragon devices
+        // this drives the dedicated HEVC block instead of burning all CPU cores on x265.
+        // Media3Engine enforces exact UHD output and the duration-derived bitrate; if a vendor
+        // codec still rejects the job, ConversionWorker automatically retries it in FFmpeg.
+        if (request.quality == QualityTier.FOUR_K_10_GB) {
+            return if (request.hardwareEncodeAvailable) {
+                Decision(Engine.MEDIA3, Reason.FOUR_K_SIZE_PRESET)
+            } else {
+                Decision(Engine.FFMPEG, Reason.NO_HARDWARE_ENCODER)
+            }
         }
 
         // Nothing is re-encoded, so none of the encoder rules below apply and neither does the
@@ -134,13 +146,6 @@ object ConversionRouter {
         // This is the fast path the remux feature exists for.
         if (plan.isPureRemux) {
             return Decision(Engine.MEDIA3, Reason.REMUX_NO_REENCODE)
-        }
-
-        // The custom 4K/10 GB mode needs an exact 3840×2160 scale/pad filter and a
-        // duration-derived average bitrate. Keep it on FFmpeg so the size rule is
-        // deterministic across Android vendors instead of depending on MediaCodec quirks.
-        if (request.quality == QualityTier.FOUR_K_10_GB) {
-            return Decision(Engine.FFMPEG, Reason.FOUR_K_SIZE_PRESET)
         }
 
         // CRF and two-pass are the whole point of the quality tier, and MediaCodec
@@ -200,7 +205,7 @@ object ConversionRouter {
         NO_PLATFORM_DECODER("This device cannot decode the input in hardware"),
         NO_HARDWARE_ENCODER("This device has no hardware encoder for that codec"),
         IMAGE_OUTPUT("Image output needs FFmpeg"),
-        FOUR_K_SIZE_PRESET("4K 3840×2160 with automatic max-10-GB bitrate"),
+        FOUR_K_SIZE_PRESET("4K 3840×2160 · hardware accelerated · automatic max-10-GB bitrate"),
         QUALITY_TIER_REQUIRES_CRF("Best quality uses software encoding"),
         USER_FORCED_SOFTWARE("Software encoding was requested"),
         MEDIA3_FAILED("Hardware conversion failed; retrying in software"),
