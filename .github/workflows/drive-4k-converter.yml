@@ -17,20 +17,28 @@ jobs:
 
     env:
       RCLONE_CONFIG: /tmp/rclone.conf
+      DEST_FOLDER: "Video Converter/Fertig"
       MAX_OUTPUT_BYTES: "30000000000"
       TARGET_BYTES: "28000000000"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
       - name: Install tools
+        shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends ffmpeg rclone jq curl ca-certificates
+          ffmpeg -version | head -n 1
+          rclone version | head -n 1
 
       - name: Configure Google Drive
+        id: drive
+        shell: bash
         env:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
@@ -45,7 +53,7 @@ jobs:
             fi
           done
 
-          token_response=$(curl -fsS --request POST             --data-urlencode "client_id=$GOOGLE_CLIENT_ID"             --data-urlencode "client_secret=$GOOGLE_CLIENT_SECRET"             --data-urlencode "refresh_token=$GOOGLE_REFRESH_TOKEN"             --data-urlencode "grant_type=refresh_token"             https://oauth2.googleapis.com/token)
+          token_response=$(curl -fsS --retry 3 --request POST             --data-urlencode "client_id=$GOOGLE_CLIENT_ID"             --data-urlencode "client_secret=$GOOGLE_CLIENT_SECRET"             --data-urlencode "refresh_token=$GOOGLE_REFRESH_TOKEN"             --data-urlencode "grant_type=refresh_token"             "https://oauth2.googleapis.com/token")
 
           access_token=$(printf '%s' "$token_response" | jq -r '.access_token // empty')
           expires_in=$(printf '%s' "$token_response" | jq -r '.expires_in // 3600')
@@ -57,144 +65,42 @@ jobs:
 
           echo "::add-mask::$access_token"
           expiry=$(date -u -d "+${expires_in} seconds" '+%Y-%m-%dT%H:%M:%SZ')
-
           token_json=$(jq -cn             --arg at "$access_token"             --arg rt "$GOOGLE_REFRESH_TOKEN"             --arg ex "$expiry"             '{access_token:$at,token_type:"Bearer",refresh_token:$rt,expiry:$ex}')
 
           rclone config create drive drive             client_id "$GOOGLE_CLIENT_ID"             client_secret "$GOOGLE_CLIENT_SECRET"             scope drive             token "$token_json"             --non-interactive >/dev/null
 
           rclone about drive: >/dev/null
 
+          account_json=$(curl -fsS             -H "Authorization: Bearer $access_token"             "https://www.googleapis.com/drive/v3/about?fields=user(displayName,emailAddress)" || true)
+
+          account_email=$(printf '%s' "$account_json" | jq -r '.user.emailAddress // empty' 2>/dev/null || true)
+          account_name=$(printf '%s' "$account_json" | jq -r '.user.displayName // empty' 2>/dev/null || true)
+
+          if [ -n "$account_email" ]; then
+            masked_email=$(python3 -c 'import sys; e=sys.argv[1]; a,b=e.split("@",1); print((a[:2]+"***" if len(a)>2 else "***")+"@"+b)' "$account_email")
+            echo "Using Google Drive account: $masked_email"
+            echo "masked_account=$masked_email" >> "$GITHUB_OUTPUT"
+          elif [ -n "$account_name" ]; then
+            echo "Using Google Drive account: $account_name"
+            echo "masked_account=$account_name" >> "$GITHUB_OUTPUT"
+          else
+            echo "Using authenticated Google Drive account."
+            echo "masked_account=authenticated account" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Read request and download source
         id: input
+        shell: bash
         run: |
           set -euo pipefail
 
-          request_file=$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" | grep -E '^conversion-requests/[^/]+\.txt
+          request_file=$(git show --pretty="" --name-only "$GITHUB_SHA"             | grep -E '^conversion-requests/[^/]+\.txt$'             | tail -n 1 || true)
 
-          if [[ "$raw" =~ /d/([^/?]+) ]]; then
-            file_id="${BASH_REMATCH[1]}"
-          elif [[ "$raw" =~ [\?\&]id=([^\&]+) ]]; then
-            file_id="${BASH_REMATCH[1]}"
-          elif [[ "$raw" =~ ^[A-Za-z0-9_-]{10,}$ ]]; then
-            file_id="$raw"
-          else
-            echo "::error::Invalid Google Drive link or file ID."
-            exit 1
-          fi
-
-          mkdir -p "$RUNNER_TEMP/video-input"
-
-          rclone backend copyid drive: "$file_id" "$RUNNER_TEMP/video-input/"             --retries 5             --low-level-retries 10             --stats 15s             --stats-one-line
-
-          input_file=$(find "$RUNNER_TEMP/video-input" -maxdepth 1 -type f -printf '%T@ %p\n'             | sort -nr | head -n 1 | cut -d' ' -f2-)
-
-          if [ -z "$input_file" ] || [ ! -s "$input_file" ]; then
-            echo "::error::Source file was not downloaded."
-            exit 1
-          fi
-
-          echo "input_file=$input_file" >> "$GITHUB_OUTPUT"
-
-      - name: Probe source and calculate bitrate
-        id: probe
-        env:
-          INPUT_FILE: ${{ steps.input.outputs.input_file }}
-        run: |
-          set -euo pipefail
-
-          duration=$(ffprobe -v error             -show_entries format=duration             -of default=noprint_wrappers=1:nokey=1             "$INPUT_FILE" | head -n 1)
-
-          python3 -c 'import math,sys; d=float(sys.argv[1]); assert d>0 and math.isfinite(d)' "$duration"
-
-          video_bps=$(python3 -c 'import sys; d=float(sys.argv[1]); t=int(sys.argv[2]); a=192000; print(max(500000,min(int((t*8/d)*0.985-a),80000000)))' "$duration" "$TARGET_BYTES")
-
-          base=$(basename "$INPUT_FILE")
-          stem="${base%.*}"
-          ext="${base##*.}"
-          if [ "$base" = "$stem" ]; then
-            output_name="${base}.mp4"
-          elif [ "${ext,,}" = "mp4" ]; then
-            output_name="$base"
-          else
-            output_name="${stem}.mp4"
-          fi
-          output_name=$(printf '%s' "$output_name" | tr '/\\\r\n\t' '____')
-
-          echo "video_bps=$video_bps" >> "$GITHUB_OUTPUT"
-          echo "output_name=$output_name" >> "$GITHUB_OUTPUT"
-
-      - name: Convert to 4K HEVC and stream to Drive
-        id: convert
-        env:
-          INPUT_FILE: ${{ steps.input.outputs.input_file }}
-          OUTPUT_NAME: ${{ steps.probe.outputs.output_name }}
-          INITIAL_VIDEO_BPS: ${{ steps.probe.outputs.video_bps }}
-        run: |
-          set -euo pipefail
-
-          dest_folder="Video Converter/Fertig"
-          dest_path="$dest_folder/$OUTPUT_NAME"
-          rclone mkdir "drive:$dest_folder"
-
-          bitrate="$INITIAL_VIDEO_BPS"
-          success=0
-          final_size=0
-
-          for attempt in 1 2 3; do
-            maxrate=$(( bitrate * 12 / 10 ))
-            bufsize=$(( bitrate * 2 ))
-
-            echo "Attempt $attempt/3 - video bitrate $(( bitrate / 1000 )) kbit/s"
-
-            set +e
-            ffmpeg -hide_banner -loglevel warning -stats               -i "$INPUT_FILE"               -map 0:v:0 -map '0:a?'               -vf "scale=3840:2160:force_original_aspect_ratio=decrease,pad=3840:2160:(ow-iw)/2:(oh-ih)/2,setsar=1"               -c:v libx265 -preset ultrafast -pix_fmt yuv420p               -b:v "$bitrate" -maxrate "$maxrate" -bufsize "$bufsize"               -c:a aac -b:a 192k               -movflags +frag_keyframe+empty_moov+default_base_moof               -f mp4 pipe:1             | rclone rcat "drive:$dest_path"                 --drive-chunk-size 64M                 --stats 15s                 --stats-one-line                 --retries 5                 --low-level-retries 20
-
-            ffmpeg_status=${PIPESTATUS[0]}
-            rclone_status=${PIPESTATUS[1]}
-            set -e
-
-            if [ "$ffmpeg_status" -ne 0 ] || [ "$rclone_status" -ne 0 ]; then
-              rclone deletefile "drive:$dest_path" >/dev/null 2>&1 || true
-              echo "::error::Conversion or Drive upload failed."
-              exit 1
-            fi
-
-            final_size=$(rclone size --json "drive:$dest_path" | jq -r '.bytes // 0')
-            echo "Uploaded size: $final_size bytes"
-
-            if [ "$final_size" -gt 0 ] && [ "$final_size" -le "$MAX_OUTPUT_BYTES" ]; then
-              success=1
-              break
-            fi
-
-            rclone deletefile "drive:$dest_path" >/dev/null 2>&1 || true
-            bitrate=$(python3 -c 'import sys; b=int(sys.argv[1]); s=max(1,int(sys.argv[2])); print(max(500000,int(b*(28500000000/s))))' "$bitrate" "$final_size")
-          done
-
-          if [ "$success" -ne 1 ]; then
-            echo "::error::Could not keep output at or below 30 GB."
-            exit 1
-          fi
-
-          echo "dest_path=$dest_path" >> "$GITHUB_OUTPUT"
-          echo "final_size=$final_size" >> "$GITHUB_OUTPUT"
-
-      - name: Summary
-        env:
-          DEST_PATH: ${{ steps.convert.outputs.dest_path }}
-          FINAL_SIZE: ${{ steps.convert.outputs.final_size }}
-        run: |
-          size_gb=$(python3 -c 'import sys; print(round(int(sys.argv[1])/1000000000,3))' "$FINAL_SIZE")
-          echo "## Conversion complete" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Google Drive: \`$DEST_PATH\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Size: $size_gb GB" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Video: 3840x2160 HEVC/H.265" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Audio: AAC 192 kbit/s" >> "$GITHUB_STEP_SUMMARY"
- | tail -n 1 || true)
           if [ -z "$request_file" ] || [ ! -f "$request_file" ]; then
             echo "::error::No conversion request file found in this commit."
             exit 1
           fi
+
           raw=$(sed -n '1p' "$request_file" | tr -d '\r\n\t ')
 
           if [[ "$raw" =~ /d/([^/?]+) ]]; then
@@ -208,25 +114,41 @@ jobs:
             exit 1
           fi
 
-          mkdir -p "$RUNNER_TEMP/video-input"
+          input_dir="$RUNNER_TEMP/video-input"
+          mkdir -p "$input_dir"
 
-          rclone backend copyid drive: "$file_id" "$RUNNER_TEMP/video-input/"             --retries 5             --low-level-retries 10             --stats 15s             --stats-one-line
+          start_epoch=$(date +%s)
+          echo "Downloading source from Google Drive..."
 
-          input_file=$(find "$RUNNER_TEMP/video-input" -maxdepth 1 -type f -printf '%T@ %p\n'             | sort -nr | head -n 1 | cut -d' ' -f2-)
+          rclone backend copyid drive: "$file_id" "$input_dir/"             --stats 10s             --stats-one-line             --retries 5             --low-level-retries 10
+
+          end_epoch=$(date +%s)
+          elapsed=$(( end_epoch - start_epoch ))
+          [ "$elapsed" -gt 0 ] || elapsed=1
+
+          input_file=$(find "$input_dir" -maxdepth 1 -type f -printf '%T@ %p\n'             | sort -nr | head -n 1 | cut -d' ' -f2-)
 
           if [ -z "$input_file" ] || [ ! -s "$input_file" ]; then
             echo "::error::Source file was not downloaded."
             exit 1
           fi
 
+          source_size=$(stat -c '%s' "$input_file")
+          avg_bps=$(( source_size * 8 / elapsed ))
+
+          echo "Downloaded: $(basename "$input_file")"
+          echo "Source size: $source_size bytes"
+          echo "Average download: $(( avg_bps / 1000000 )) Mbit/s"
+
           echo "input_file=$input_file" >> "$GITHUB_OUTPUT"
-          echo "requested_name=$requested_name" >> "$GITHUB_OUTPUT"
+          echo "source_size=$source_size" >> "$GITHUB_OUTPUT"
+          echo "download_mbps=$(( avg_bps / 1000000 ))" >> "$GITHUB_OUTPUT"
 
       - name: Probe source and calculate bitrate
         id: probe
+        shell: bash
         env:
           INPUT_FILE: ${{ steps.input.outputs.input_file }}
-          REQUESTED_NAME: ${{ steps.input.outputs.requested_name }}
         run: |
           set -euo pipefail
 
@@ -234,23 +156,33 @@ jobs:
 
           python3 -c 'import math,sys; d=float(sys.argv[1]); assert d>0 and math.isfinite(d)' "$duration"
 
-          video_bps=$(python3 -c 'import sys; d=float(sys.argv[1]); t=int(sys.argv[2]); a=192000; print(max(500000,min(int((t*8/d)*0.985-a),80000000)))' "$duration" "$TARGET_BYTES")
+          video_bps=$(python3 -c             'import sys; d=float(sys.argv[1]); t=int(sys.argv[2]); a=192000; print(max(500000,min(int((t*8/d)*0.985-a),80000000)))'             "$duration" "$TARGET_BYTES")
 
           base=$(basename "$INPUT_FILE")
           stem="${base%.*}"
-          if [ -n "${REQUESTED_NAME:-}" ]; then
-            output_name="$REQUESTED_NAME"
-            [[ "$output_name" == *.mp4 ]] || output_name="${output_name}.mp4"
+          ext="${base##*.}"
+
+          if [ "$base" = "$stem" ]; then
+            output_name="${base}.mp4"
+          elif [ "${ext,,}" = "mp4" ]; then
+            output_name="$base"
           else
-            output_name="${stem}_4K_HEVC.mp4"
+            output_name="${stem}.mp4"
           fi
+
           output_name=$(printf '%s' "$output_name" | tr '/\\\r\n\t' '____')
 
+          echo "Duration: $(python3 -c 'import sys; print(round(float(sys.argv[1])/60,2))' "$duration") minutes"
+          echo "Target video bitrate: $(( video_bps / 1000000 )) Mbit/s"
+          echo "Output filename: $output_name"
+
+          echo "duration=$duration" >> "$GITHUB_OUTPUT"
           echo "video_bps=$video_bps" >> "$GITHUB_OUTPUT"
           echo "output_name=$output_name" >> "$GITHUB_OUTPUT"
 
-      - name: Convert to 4K HEVC and stream to Drive
+      - name: Convert 4K HEVC ultrafast and stream to Drive
         id: convert
+        shell: bash
         env:
           INPUT_FILE: ${{ steps.input.outputs.input_file }}
           OUTPUT_NAME: ${{ steps.probe.outputs.output_name }}
@@ -258,9 +190,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          dest_folder="Video Converter/Fertig"
-          dest_path="$dest_folder/$OUTPUT_NAME"
-          rclone mkdir "drive:$dest_folder"
+          dest_path="${DEST_FOLDER%/}/$OUTPUT_NAME"
+          rclone mkdir "drive:${DEST_FOLDER%/}"
 
           bitrate="$INITIAL_VIDEO_BPS"
           success=0
@@ -270,14 +201,19 @@ jobs:
             maxrate=$(( bitrate * 12 / 10 ))
             bufsize=$(( bitrate * 2 ))
 
-            echo "Attempt $attempt/3 - video bitrate $(( bitrate / 1000 )) kbit/s"
+            echo "Attempt $attempt/3"
+            echo "4K HEVC x265 preset: ultrafast"
+            echo "Video bitrate: $(( bitrate / 1000000 )) Mbit/s"
+            echo "Streaming encoded MP4 directly to Google Drive..."
 
             set +e
-            ffmpeg -hide_banner -loglevel warning -stats               -i "$INPUT_FILE"               -map 0:v:0 -map '0:a?'               -vf "scale=3840:2160:force_original_aspect_ratio=decrease,pad=3840:2160:(ow-iw)/2:(oh-ih)/2,setsar=1"               -c:v libx265 -preset ultrafast -pix_fmt yuv420p               -b:v "$bitrate" -maxrate "$maxrate" -bufsize "$bufsize"               -c:a aac -b:a 192k               -movflags +frag_keyframe+empty_moov+default_base_moof               -f mp4 pipe:1             | rclone rcat "drive:$dest_path"                 --drive-chunk-size 64M                 --stats 15s                 --stats-one-line                 --retries 5                 --low-level-retries 20
+            ffmpeg -hide_banner -loglevel warning -stats               -i "$INPUT_FILE"               -map 0:v:0 -map '0:a?'               -vf "scale=3840:2160:force_original_aspect_ratio=decrease,pad=3840:2160:(ow-iw)/2:(oh-ih)/2,setsar=1"               -c:v libx265               -preset ultrafast               -pix_fmt yuv420p               -b:v "$bitrate"               -maxrate "$maxrate"               -bufsize "$bufsize"               -c:a aac               -b:a 192k               -movflags +frag_keyframe+empty_moov+default_base_moof               -f mp4 pipe:1             | rclone rcat "drive:$dest_path"                 --drive-chunk-size 64M                 --stats 10s                 --stats-one-line                 --retries 5                 --low-level-retries 20
 
-            ffmpeg_status=${PIPESTATUS[0]}
-            rclone_status=${PIPESTATUS[1]}
+            pipe_status=( "${PIPESTATUS[@]}" )
             set -e
+
+            ffmpeg_status="${pipe_status[0]:-1}"
+            rclone_status="${pipe_status[1]:-1}"
 
             if [ "$ffmpeg_status" -ne 0 ] || [ "$rclone_status" -ne 0 ]; then
               rclone deletefile "drive:$dest_path" >/dev/null 2>&1 || true
@@ -286,33 +222,52 @@ jobs:
             fi
 
             final_size=$(rclone size --json "drive:$dest_path" | jq -r '.bytes // 0')
-            echo "Uploaded size: $final_size bytes"
+            echo "Uploaded output size: $final_size bytes"
 
             if [ "$final_size" -gt 0 ] && [ "$final_size" -le "$MAX_OUTPUT_BYTES" ]; then
               success=1
               break
             fi
 
+            echo "::warning::Output exceeded 30 GB. Retrying at a lower bitrate."
             rclone deletefile "drive:$dest_path" >/dev/null 2>&1 || true
-            bitrate=$(python3 -c 'import sys; b=int(sys.argv[1]); s=max(1,int(sys.argv[2])); print(max(500000,int(b*(9200000000/s))))' "$bitrate" "$final_size")
+
+            bitrate=$(python3 -c               'import sys; b=int(sys.argv[1]); s=max(1,int(sys.argv[2])); print(max(500000,int(b*(28500000000/s))))'               "$bitrate" "$final_size")
           done
 
           if [ "$success" -ne 1 ]; then
-            echo "::error::Could not keep output at or below 10 GB."
+            rclone deletefile "drive:$dest_path" >/dev/null 2>&1 || true
+            echo "::error::Could not keep output at or below 30 GB."
             exit 1
           fi
 
           echo "dest_path=$dest_path" >> "$GITHUB_OUTPUT"
           echo "final_size=$final_size" >> "$GITHUB_OUTPUT"
+          echo "final_bitrate=$bitrate" >> "$GITHUB_OUTPUT"
 
       - name: Summary
+        shell: bash
         env:
+          DRIVE_ACCOUNT: ${{ steps.drive.outputs.masked_account }}
           DEST_PATH: ${{ steps.convert.outputs.dest_path }}
           FINAL_SIZE: ${{ steps.convert.outputs.final_size }}
+          FINAL_BITRATE: ${{ steps.convert.outputs.final_bitrate }}
+          DOWNLOAD_MBPS: ${{ steps.input.outputs.download_mbps }}
         run: |
+          set -euo pipefail
+
           size_gb=$(python3 -c 'import sys; print(round(int(sys.argv[1])/1000000000,3))' "$FINAL_SIZE")
-          echo "## Conversion complete" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Google Drive: \`$DEST_PATH\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Size: $size_gb GB" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Video: 3840x2160 HEVC/H.265" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Audio: AAC 192 kbit/s" >> "$GITHUB_STEP_SUMMARY"
+          bitrate_mbps=$(python3 -c 'import sys; print(round(int(sys.argv[1])/1000000,2))' "$FINAL_BITRATE")
+
+          {
+            echo "## 4K conversion complete"
+            echo
+            echo "- **Drive account:** $DRIVE_ACCOUNT"
+            echo "- **Google Drive output:** \`$DEST_PATH\`"
+            echo "- **Output size:** $size_gb GB"
+            echo "- **Video:** 3840x2160 HEVC/H.265"
+            echo "- **x265 preset:** ultrafast"
+            echo "- **Video bitrate:** $bitrate_mbps Mbit/s"
+            echo "- **Average source download:** $DOWNLOAD_MBPS Mbit/s"
+            echo "- **Maximum output:** 30 GB"
+          } >> "$GITHUB_STEP_SUMMARY"
