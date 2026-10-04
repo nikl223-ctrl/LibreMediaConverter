@@ -15,6 +15,9 @@ jobs:
   cancel:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Cancel requested H264 run
         env:
           GH_TOKEN: ${{ github.token }}
