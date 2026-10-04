@@ -1,0 +1,171 @@
+name: Drive 4K H264 Video Converter
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "conversion-requests-h264/*.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    env:
+      RCLONE_CONFIG: /tmp/rclone.conf
+      DEST_FOLDER: "Video Converter/Fertig"
+      MAX_OUTPUT_BYTES: "30000000000"
+      TARGET_BYTES: "28000000000"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Install tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg rclone jq curl ca-certificates
+
+      - name: Configure Google Drive
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+          for var in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET GOOGLE_REFRESH_TOKEN; do
+            if [ -z "${!var:-}" ]; then
+              echo "::error::Missing GitHub secret: $var"
+              exit 1
+            fi
+          done
+
+          token_response=$(curl -fsS --request POST             --data-urlencode "client_id=$GOOGLE_CLIENT_ID"             --data-urlencode "client_secret=$GOOGLE_CLIENT_SECRET"             --data-urlencode "refresh_token=$GOOGLE_REFRESH_TOKEN"             --data-urlencode "grant_type=refresh_token"             https://oauth2.googleapis.com/token)
+
+          access_token=$(printf '%s' "$token_response" | jq -r '.access_token // empty')
+          expires_in=$(printf '%s' "$token_response" | jq -r '.expires_in // 3600')
+          [ -n "$access_token" ] || { echo "::error::Google OAuth refresh failed."; exit 1; }
+
+          echo "::add-mask::$access_token"
+          expiry=$(date -u -d "+${expires_in} seconds" '+%Y-%m-%dT%H:%M:%SZ')
+          token_json=$(jq -cn             --arg at "$access_token"             --arg rt "$GOOGLE_REFRESH_TOKEN"             --arg ex "$expiry"             '{access_token:$at,token_type:"Bearer",refresh_token:$rt,expiry:$ex}')
+
+          rclone config create drive drive             client_id "$GOOGLE_CLIENT_ID"             client_secret "$GOOGLE_CLIENT_SECRET"             scope drive             token "$token_json"             --non-interactive >/dev/null
+
+          rclone about drive: >/dev/null
+
+      - name: Read request and download source
+        id: input
+        run: |
+          set -euo pipefail
+          request_file=$(git show --pretty="" --name-only "$GITHUB_SHA"             | grep -E '^conversion-requests-h264/[^/]+\.txt$'             | tail -n 1 || true)
+
+          if [ -z "$request_file" ] || [ ! -f "$request_file" ]; then
+            echo "::error::No H264 conversion request found."
+            exit 1
+          fi
+
+          raw=$(sed -n '1p' "$request_file" | tr -d '\r\n\t ')
+
+          if [[ "$raw" =~ /d/([^/?]+) ]]; then
+            file_id="${BASH_REMATCH[1]}"
+          elif [[ "$raw" =~ [\?\&]id=([^\&]+) ]]; then
+            file_id="${BASH_REMATCH[1]}"
+          else
+            file_id="$raw"
+          fi
+
+          mkdir -p "$RUNNER_TEMP/video-input"
+          rclone backend copyid drive: "$file_id" "$RUNNER_TEMP/video-input/"             --stats 10s --stats-one-line --retries 5 --low-level-retries 10
+
+          input_file=$(find "$RUNNER_TEMP/video-input" -maxdepth 1 -type f -printf '%T@ %p\n'             | sort -nr | head -n 1 | cut -d' ' -f2-)
+
+          if [ -z "$input_file" ] || [ ! -s "$input_file" ]; then
+            echo "::error::Source file was not downloaded."
+            exit 1
+          fi
+
+          echo "input_file=$input_file" >> "$GITHUB_OUTPUT"
+
+      - name: Probe source and calculate bitrate
+        id: probe
+        env:
+          INPUT_FILE: ${{ steps.input.outputs.input_file }}
+        run: |
+          set -euo pipefail
+          duration=$(ffprobe -v error -show_entries format=duration             -of default=noprint_wrappers=1:nokey=1 "$INPUT_FILE" | head -n 1)
+
+          video_bps=$(python3 -c             'import sys; d=float(sys.argv[1]); t=int(sys.argv[2]); a=192000; print(max(500000,min(int((t*8/d)*0.985-a),100000000)))'             "$duration" "$TARGET_BYTES")
+
+          base=$(basename "$INPUT_FILE")
+          stem="${base%.*}"
+          ext="${base##*.}"
+          if [ "$base" = "$stem" ]; then
+            output_name="${base}.mp4"
+          elif [ "${ext,,}" = "mp4" ]; then
+            output_name="$base"
+          else
+            output_name="${stem}.mp4"
+          fi
+          output_name=$(printf '%s' "$output_name" | tr '/\\\r\n\t' '____')
+
+          echo "video_bps=$video_bps" >> "$GITHUB_OUTPUT"
+          echo "output_name=$output_name" >> "$GITHUB_OUTPUT"
+
+      - name: Convert 4K H264 ultrafast and stream to Drive
+        id: convert
+        env:
+          INPUT_FILE: ${{ steps.input.outputs.input_file }}
+          OUTPUT_NAME: ${{ steps.probe.outputs.output_name }}
+          VIDEO_BPS: ${{ steps.probe.outputs.video_bps }}
+        run: |
+          set -euo pipefail
+          dest_path="${DEST_FOLDER%/}/$OUTPUT_NAME"
+          rclone mkdir "drive:${DEST_FOLDER%/}"
+
+          bitrate="$VIDEO_BPS"
+          maxrate=$(( bitrate * 12 / 10 ))
+          bufsize=$(( bitrate * 2 ))
+
+          set +e
+          ffmpeg -hide_banner -loglevel warning -stats             -i "$INPUT_FILE"             -map 0:v:0 -map '0:a?'             -vf "scale=3840:2160:force_original_aspect_ratio=decrease,pad=3840:2160:(ow-iw)/2:(oh-ih)/2,setsar=1"             -c:v libx264             -preset ultrafast             -profile:v high             -level:v 5.1             -pix_fmt yuv420p             -b:v "$bitrate"             -maxrate "$maxrate"             -bufsize "$bufsize"             -c:a aac -b:a 192k             -movflags +frag_keyframe+empty_moov+default_base_moof             -f mp4 pipe:1           | rclone rcat "drive:$dest_path"               --drive-chunk-size 64M               --stats 10s               --stats-one-line               --retries 5               --low-level-retries 20
+
+          pipe_status=( "${PIPESTATUS[@]}" )
+          set -e
+
+          if [ "${pipe_status[0]:-1}" -ne 0 ] || [ "${pipe_status[1]:-1}" -ne 0 ]; then
+            rclone deletefile "drive:$dest_path" >/dev/null 2>&1 || true
+            echo "::error::H264 conversion or Drive upload failed."
+            exit 1
+          fi
+
+          final_size=$(rclone size --json "drive:$dest_path" | jq -r '.bytes // 0')
+          if [ "$final_size" -le 0 ] || [ "$final_size" -gt "$MAX_OUTPUT_BYTES" ]; then
+            echo "::error::Final file size invalid or above 30 GB."
+            exit 1
+          fi
+
+          echo "dest_path=$dest_path" >> "$GITHUB_OUTPUT"
+          echo "final_size=$final_size" >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        env:
+          DEST_PATH: ${{ steps.convert.outputs.dest_path }}
+          FINAL_SIZE: ${{ steps.convert.outputs.final_size }}
+        run: |
+          size_gb=$(python3 -c 'import sys; print(round(int(sys.argv[1])/1000000000,3))' "$FINAL_SIZE")
+          {
+            echo "## 4K H.264 conversion complete"
+            echo "- Output: \`$DEST_PATH\`"
+            echo "- Size: $size_gb GB"
+            echo "- Video: 3840x2160 H.264"
+            echo "- Preset: ultrafast"
+            echo "- Audio: AAC 192 kbit/s"
+          } >> "$GITHUB_STEP_SUMMARY"
