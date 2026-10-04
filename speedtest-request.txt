@@ -1,1 +1,1 @@
-run speedtest
+run speedtest against 1&1 Mobilfunk
