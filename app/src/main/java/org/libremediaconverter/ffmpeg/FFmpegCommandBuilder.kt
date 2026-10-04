@@ -35,6 +35,22 @@ object FFmpegCommandBuilder {
     private const val CRF_H264 = 20
     private const val CRF_H265 = 24
 
+    // The user's ceiling is 10 GB. Aim at 9.3 GB instead of riding the limit so
+    // container overhead and encoder rate-control variance cannot accidentally push
+    // an otherwise valid conversion above the requested maximum.
+    private const val FOUR_K_TARGET_BYTES = 9_300_000_000L
+    private const val FOUR_K_AUDIO_BITRATE_BPS = 192_000L
+    private const val FOUR_K_DEFAULT_VIDEO_BITRATE_KBPS = 12_000
+    private const val FOUR_K_MIN_VIDEO_BITRATE_KBPS = 500
+    private const val FOUR_K_MAX_VIDEO_BITRATE_KBPS = 80_000
+
+    // Preserve the source aspect ratio, then letterbox/pillarbox to an exact UHD
+    // 3840×2160 frame. setsar=1 avoids odd sample-aspect-ratio metadata leaking
+    // through from older sources.
+    private const val FOUR_K_FILTER =
+        "scale=3840:2160:force_original_aspect_ratio=decrease," +
+            "pad=3840:2160:(ow-iw)/2:(oh-ih)/2,setsar=1"
+
     /**
      * Force 4:2:0 chroma on every video encode.
      *
@@ -143,8 +159,81 @@ object FFmpegCommandBuilder {
                 addAll(hevcTagIfNeeded(plan, request))
             }
 
-            is VideoPlan.Encode -> encodeVideo(video.codec, request.quality)
+            is VideoPlan.Encode ->
+                if (request.quality == QualityTier.FOUR_K_10_GB) {
+                    encode4KMaxTenGb(video.codec, request.probe.durationMs)
+                } else {
+                    encodeVideo(video.codec, request.quality)
+                }
         }
+
+    /**
+     * Exact-UHD export with a duration-derived average bitrate.
+     *
+     * The calculation reserves AAC audio and about 7% of the user's 10 GB ceiling
+     * for MP4 overhead and encoder variance. Short clips are capped at 80 Mbit/s;
+     * long clips are allowed to fall as low as 500 kbit/s so the size promise wins.
+     */
+    private fun encode4KMaxTenGb(codec: VideoCodec, durationMs: Long): List<String> {
+        val bitrateKbps = fourKVideoBitrateKbps(durationMs)
+        val rateArgs = listOf(
+            "-b:v",
+            "${bitrateKbps}k",
+            "-maxrate",
+            "${bitrateKbps}k",
+            "-bufsize",
+            "${bitrateKbps * 2}k",
+            "-vf",
+            FOUR_K_FILTER,
+        )
+
+        return when (codec) {
+            VideoCodec.H265 -> listOf(
+                "-c:v",
+                "libx265",
+                "-preset",
+                "veryfast",
+                "-tag:v",
+                "hvc1",
+            ) + rateArgs + PIX_FMT
+
+            VideoCodec.H264 -> listOf(
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+            ) + rateArgs + PIX_FMT
+
+            // The 4K mode deliberately selects H.265, but keeping VP9 usable makes a
+            // stale queued job fail less surprisingly if settings changed after enqueue.
+            VideoCodec.VP9 -> listOf(
+                "-c:v",
+                "libvpx-vp9",
+                "-deadline",
+                "realtime",
+            ) + rateArgs + PIX_FMT
+
+            VideoCodec.VP8, VideoCodec.AV1 -> error(
+                "4K max-10-GB mode cannot encode ${codec.label}; select H.265.",
+            )
+
+            VideoCodec.COPY, VideoCodec.NONE -> error(
+                "encode4KMaxTenGb called for $codec, which is not an encode",
+            )
+        }
+    }
+
+    internal fun fourKVideoBitrateKbps(durationMs: Long): Int {
+        if (durationMs <= 0L) return FOUR_K_DEFAULT_VIDEO_BITRATE_KBPS
+
+        val durationSeconds = durationMs / 1000.0
+        val totalBits = FOUR_K_TARGET_BYTES * 8.0
+        val availableVideoBps = (totalBits / durationSeconds) - FOUR_K_AUDIO_BITRATE_BPS
+
+        return (availableVideoBps / 1000.0)
+            .toInt()
+            .coerceIn(FOUR_K_MIN_VIDEO_BITRATE_KBPS, FOUR_K_MAX_VIDEO_BITRATE_KBPS)
+    }
 
     private fun encodeVideo(codec: VideoCodec, quality: QualityTier): List<String> {
         val preset = if (quality == QualityTier.BEST) "medium" else "veryfast"
