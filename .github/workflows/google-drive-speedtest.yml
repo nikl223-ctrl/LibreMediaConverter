@@ -1,0 +1,112 @@
+name: Google Drive Speedtest
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "google-drive-speedtest-request.txt"
+  workflow_dispatch:
+
+jobs:
+  google-drive-speedtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RCLONE_CONFIG: /tmp/rclone.conf
+
+    steps:
+      - name: Install tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends rclone jq curl ca-certificates
+
+      - name: Configure Google Drive
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          for var in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET GOOGLE_REFRESH_TOKEN; do
+            if [ -z "${!var:-}" ]; then
+              echo "::error::Missing GitHub secret: $var"
+              exit 1
+            fi
+          done
+
+          token_response=$(curl -fsS --request POST             --data-urlencode "client_id=$GOOGLE_CLIENT_ID"             --data-urlencode "client_secret=$GOOGLE_CLIENT_SECRET"             --data-urlencode "refresh_token=$GOOGLE_REFRESH_TOKEN"             --data-urlencode "grant_type=refresh_token"             https://oauth2.googleapis.com/token)
+
+          access_token=$(printf '%s' "$token_response" | jq -r '.access_token // empty')
+          expires_in=$(printf '%s' "$token_response" | jq -r '.expires_in // 3600')
+
+          if [ -z "$access_token" ]; then
+            echo "::error::Google OAuth refresh failed."
+            exit 1
+          fi
+
+          echo "::add-mask::$access_token"
+          expiry=$(date -u -d "+${expires_in} seconds" '+%Y-%m-%dT%H:%M:%SZ')
+          token_json=$(jq -cn             --arg at "$access_token"             --arg rt "$GOOGLE_REFRESH_TOKEN"             --arg ex "$expiry"             '{access_token:$at,token_type:"Bearer",refresh_token:$rt,expiry:$ex}')
+
+          rclone config create drive drive             client_id "$GOOGLE_CLIENT_ID"             client_secret "$GOOGLE_CLIENT_SECRET"             scope drive             token "$token_json"             --non-interactive >/dev/null
+
+          rclone about drive: >/dev/null
+          echo "Google Drive connection: OK"
+
+      - name: Direct Google Drive upload and download speedtest
+        run: |
+          set -euo pipefail
+
+          SIZE_BYTES=1073741824
+          TEST_FILE="$RUNNER_TEMP/google-drive-speedtest.bin"
+          DOWNLOAD_FILE="$RUNNER_TEMP/google-drive-speedtest-download.bin"
+          REMOTE_PATH="Video Converter/Speedtest/github-speedtest-${GITHUB_RUN_ID}.bin"
+
+          cleanup() {
+            rclone deletefile "drive:$REMOTE_PATH" >/dev/null 2>&1 || true
+            rm -f "$TEST_FILE" "$DOWNLOAD_FILE" || true
+          }
+          trap cleanup EXIT
+
+          echo "Creating 1 GiB local test file..."
+          fallocate -l "$SIZE_BYTES" "$TEST_FILE"
+
+          echo
+          echo "============================================================"
+          echo "GOOGLE DRIVE UPLOAD TEST - 1 GiB"
+          echo "============================================================"
+          start_ns=$(date +%s%N)
+          rclone copyto "$TEST_FILE" "drive:$REMOTE_PATH"             --drive-chunk-size 256M             --transfers 1             --checkers 1             --stats 5s             --stats-one-line             --stats-log-level NOTICE             --log-level NOTICE
+          end_ns=$(date +%s%N)
+
+          upload_sec=$(awk -v s="$start_ns" -v e="$end_ns" 'BEGIN {printf "%.3f", (e-s)/1000000000}')
+          upload_mbps=$(awk -v b="$SIZE_BYTES" -v t="$upload_sec" 'BEGIN {printf "%.2f", (b*8/t)/1000000}')
+          upload_mibs=$(awk -v b="$SIZE_BYTES" -v t="$upload_sec" 'BEGIN {printf "%.2f", (b/t)/1048576}')
+
+          echo
+          echo "GOOGLE DRIVE UPLOAD RESULT: ${upload_mbps} Mbit/s | ${upload_mibs} MiB/s | ${upload_sec} s"
+
+          echo
+          echo "============================================================"
+          echo "GOOGLE DRIVE DOWNLOAD TEST - 1 GiB"
+          echo "============================================================"
+          start_ns=$(date +%s%N)
+          rclone copyto "drive:$REMOTE_PATH" "$DOWNLOAD_FILE"             --transfers 1             --checkers 1             --stats 5s             --stats-one-line             --stats-log-level NOTICE             --log-level NOTICE
+          end_ns=$(date +%s%N)
+
+          download_sec=$(awk -v s="$start_ns" -v e="$end_ns" 'BEGIN {printf "%.3f", (e-s)/1000000000}')
+          download_mbps=$(awk -v b="$SIZE_BYTES" -v t="$download_sec" 'BEGIN {printf "%.2f", (b*8/t)/1000000}')
+          download_mibs=$(awk -v b="$SIZE_BYTES" -v t="$download_sec" 'BEGIN {printf "%.2f", (b/t)/1048576}')
+
+          echo
+          echo "GOOGLE DRIVE DOWNLOAD RESULT: ${download_mbps} Mbit/s | ${download_mibs} MiB/s | ${download_sec} s"
+
+          echo
+          echo "============================================================"
+          echo "FINAL GOOGLE DRIVE SPEED"
+          echo "Upload:   ${upload_mbps} Mbit/s (${upload_mibs} MiB/s)"
+          echo "Download: ${download_mbps} Mbit/s (${download_mibs} MiB/s)"
+          echo "============================================================"
