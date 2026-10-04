@@ -69,7 +69,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          raw=$(tr -d '\r\n\t ' < conversion-requests/current.txt)
+          raw=$(sed -n '1p' conversion-requests/current.txt | tr -d '\r\n\t ')
+          requested_name=$(sed -n '2p' conversion-requests/current.txt | tr -d '\r\n')
 
           if [[ "$raw" =~ /d/([^/?]+) ]]; then
             file_id="${BASH_REMATCH[1]}"
@@ -94,11 +95,13 @@ jobs:
           fi
 
           echo "input_file=$input_file" >> "$GITHUB_OUTPUT"
+          echo "requested_name=$requested_name" >> "$GITHUB_OUTPUT"
 
       - name: Probe source and calculate bitrate
         id: probe
         env:
           INPUT_FILE: ${{ steps.input.outputs.input_file }}
+          REQUESTED_NAME: ${{ steps.input.outputs.requested_name }}
         run: |
           set -euo pipefail
 
@@ -110,7 +113,12 @@ jobs:
 
           base=$(basename "$INPUT_FILE")
           stem="${base%.*}"
-          output_name="${stem}_4K_HEVC.mp4"
+          if [ -n "${REQUESTED_NAME:-}" ]; then
+            output_name="$REQUESTED_NAME"
+            [[ "$output_name" == *.mp4 ]] || output_name="${output_name}.mp4"
+          else
+            output_name="${stem}_4K_HEVC.mp4"
+          fi
           output_name=$(printf '%s' "$output_name" | tr '/\\\r\n\t' '____')
 
           echo "video_bps=$video_bps" >> "$GITHUB_OUTPUT"
