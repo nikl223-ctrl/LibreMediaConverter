@@ -30,10 +30,30 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y speedtest-cli
 
-      - name: Run internet speedtest
+      - name: Find 1&1 Mobilfunk server and run speedtest
         run: |
+          set -euo pipefail
           echo "=============================================="
-          echo "INTERNET SPEEDTEST"
+          echo "SEARCHING FOR 1&1 MOBILFUNK SPEEDTEST SERVER"
           echo "=============================================="
-          speedtest-cli --secure --simple
+
+          matches="$(speedtest-cli --secure --list 2>/dev/null | grep -Ei '1&1|1und1|1 und 1' || true)"
+          if [ -z "$matches" ]; then
+            echo "::error::No 1&1 speedtest server found in the server list."
+            exit 1
+          fi
+
+          echo "$matches" | head -20
+          server_id="$(printf '%s\n' "$matches" | sed -n 's/^[[:space:]]*\([0-9][0-9]*\)).*/\1/p' | head -1)"
+          if [ -z "$server_id" ]; then
+            echo "::error::Could not parse 1&1 server id."
+            exit 1
+          fi
+
+          echo
+          echo "Selected 1&1 server ID: $server_id"
+          echo "=============================================="
+          echo "INTERNET SPEEDTEST -> 1&1"
+          echo "=============================================="
+          speedtest-cli --secure --server "$server_id" --simple
           echo "=============================================="
