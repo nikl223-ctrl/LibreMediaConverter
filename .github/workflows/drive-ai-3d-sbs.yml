@@ -25,14 +25,20 @@ jobs:
         with:
           fetch-depth: 2
 
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Install AI and video tools
         run: |
           set -euo pipefail
           command -v ffmpeg >/dev/null 2>&1 || brew install ffmpeg
           command -v rclone >/dev/null 2>&1 || brew install rclone
           command -v jq >/dev/null 2>&1 || brew install jq
-          python3 -m pip install --upgrade pip
-          python3 -m pip install "torch>=2.4" "transformers>=4.47,<5" safetensors pillow numpy opencv-python-headless
+          python -m pip install --upgrade pip
+          python -m pip install "torch>=2.4" "transformers>=4.47,<5" safetensors pillow numpy opencv-python-headless
+          python -c "import torch,transformers,cv2,numpy; print('Python AI stack OK'); print('MPS available:', torch.backends.mps.is_available())"
           ffmpeg -hide_banner -encoders 2>/dev/null | grep h264_videotoolbox
 
       - name: Configure Google Drive
@@ -68,7 +74,7 @@ jobs:
           [ -n "$access_token" ] || { echo "::error::OAuth refresh failed."; exit 1; }
           echo "::add-mask::$access_token"
 
-          expiry=$(python3 -c 'import sys,datetime; s=int(sys.argv[1]); print((datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(seconds=s)).strftime("%Y-%m-%dT%H:%M:%SZ"))' "$expires_in")
+          expiry=$(python -c 'import sys,datetime; s=int(sys.argv[1]); print((datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(seconds=s)).strftime("%Y-%m-%dT%H:%M:%SZ"))' "$expires_in")
 
           token_json=$(jq -cn \
             --arg at "$access_token" \
@@ -154,7 +160,7 @@ jobs:
 
           output_file="$RUNNER_TEMP/$OUTPUT_NAME"
 
-          python3 tools/ai_stereo_3d.py \
+          python tools/ai_stereo_3d.py \
             --input "$INPUT_FILE" \
             --output "$output_file" \
             --start "$START_SECONDS" \
@@ -206,7 +212,7 @@ jobs:
           START_SECONDS: ${{ steps.input.outputs.start_seconds }}
           DURATION_SECONDS: ${{ steps.input.outputs.duration_seconds }}
         run: |
-          size_mb=$(python3 -c 'import sys; print(round(int(sys.argv[1])/1000000,1))' "$FINAL_SIZE")
+          size_mb=$(python -c 'import sys; print(round(int(sys.argv[1])/1000000,1))' "$FINAL_SIZE")
           {
             echo "## Quest 3 AI stereo test complete"
             echo "- Output: `$DEST`"
