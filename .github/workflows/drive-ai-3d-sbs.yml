@@ -1,0 +1,220 @@
+name: Drive AI 3D SBS Quest Test
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "conversion-requests-3d/*.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  convert:
+    runs-on: macos-15
+    timeout-minutes: 350
+
+    env:
+      RCLONE_CONFIG: /tmp/rclone.conf
+      DEST_FOLDER: "Video Converter/Fertig/3D Tests"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Install AI and video tools
+        run: |
+          set -euo pipefail
+          command -v ffmpeg >/dev/null 2>&1 || brew install ffmpeg
+          command -v rclone >/dev/null 2>&1 || brew install rclone
+          command -v jq >/dev/null 2>&1 || brew install jq
+          python3 -m pip install --upgrade pip
+          python3 -m pip install "torch>=2.4" "transformers>=4.47,<5" safetensors pillow numpy opencv-python-headless
+          ffmpeg -hide_banner -encoders 2>/dev/null | grep h264_videotoolbox
+
+      - name: Configure Google Drive
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          for var in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET GOOGLE_REFRESH_TOKEN; do
+            if [ -z "${!var:-}" ]; then
+              echo "::error::Missing GitHub secret: $var"
+              exit 1
+            fi
+          done
+
+          client_project="${GOOGLE_CLIENT_ID%%-*}"
+          if [ "$client_project" = "202264815644" ]; then
+            echo "::error::Shared rclone OAuth client is not allowed."
+            exit 1
+          fi
+
+          token_response=$(curl -fsS --request POST \
+            --data-urlencode "client_id=$GOOGLE_CLIENT_ID" \
+            --data-urlencode "client_secret=$GOOGLE_CLIENT_SECRET" \
+            --data-urlencode "refresh_token=$GOOGLE_REFRESH_TOKEN" \
+            --data-urlencode "grant_type=refresh_token" \
+            https://oauth2.googleapis.com/token)
+
+          access_token=$(printf '%s' "$token_response" | jq -r '.access_token // empty')
+          expires_in=$(printf '%s' "$token_response" | jq -r '.expires_in // 3600')
+          [ -n "$access_token" ] || { echo "::error::OAuth refresh failed."; exit 1; }
+          echo "::add-mask::$access_token"
+
+          expiry=$(python3 -c 'import sys,datetime; s=int(sys.argv[1]); print((datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(seconds=s)).strftime("%Y-%m-%dT%H:%M:%SZ"))' "$expires_in")
+
+          token_json=$(jq -cn \
+            --arg at "$access_token" \
+            --arg rt "$GOOGLE_REFRESH_TOKEN" \
+            --arg ex "$expiry" \
+            '{access_token:$at,token_type:"Bearer",refresh_token:$rt,expiry:$ex}')
+
+          rclone config create drive drive \
+            client_id "$GOOGLE_CLIENT_ID" \
+            client_secret "$GOOGLE_CLIENT_SECRET" \
+            scope drive \
+            token "$token_json" \
+            --non-interactive >/dev/null
+
+          rclone about drive: >/dev/null
+
+      - name: Read 3D request and download source
+        id: input
+        run: |
+          set -euo pipefail
+
+          request_file=$(git show --pretty="" --name-only "$GITHUB_SHA" \
+            | grep -E '^conversion-requests-3d/[^/]+\.txt$' \
+            | tail -n 1 || true)
+
+          if [ -z "$request_file" ] || [ ! -f "$request_file" ]; then
+            echo "::error::No 3D conversion request found."
+            exit 1
+          fi
+
+          raw=$(sed -n '1p' "$request_file" | tr -d '\r\n\t ')
+          start_seconds=$(sed -n 's/^START_SECONDS=//p' "$request_file" | tail -n 1 | tr -d '\r\n\t ' || true)
+          duration_seconds=$(sed -n 's/^DURATION_SECONDS=//p' "$request_file" | tail -n 1 | tr -d '\r\n\t ' || true)
+          output_name=$(sed -n 's/^OUTPUT_NAME=//p' "$request_file" | tail -n 1 | tr -d '\r\n' || true)
+
+          [ -n "$start_seconds" ] || start_seconds=300
+          [ -n "$duration_seconds" ] || duration_seconds=45
+          [ -n "$output_name" ] || output_name="Quest3_AI_3D_SBS_LR_Test.mp4"
+
+          if [[ "$raw" =~ /d/([^/?]+) ]]; then
+            file_id="${BASH_REMATCH[1]}"
+          elif [[ "$raw" =~ [\?\&]id=([^\&]+) ]]; then
+            file_id="${BASH_REMATCH[1]}"
+          else
+            file_id="$raw"
+          fi
+
+          input_dir="$RUNNER_TEMP/video-input"
+          mkdir -p "$input_dir"
+
+          echo "Downloading source..."
+          rclone backend copyid drive: "$file_id" "$input_dir/" \
+            --stats 10s --stats-one-line \
+            --retries 5 --low-level-retries 10
+
+          input_file=$(ls -1t "$input_dir"/* 2>/dev/null | head -n 1 || true)
+          if [ -z "$input_file" ] || [ ! -s "$input_file" ]; then
+            echo "::error::Source file was not downloaded."
+            exit 1
+          fi
+
+          output_name=$(printf '%s' "$output_name" | tr '/\\\r\n\t' '_____')
+
+          echo "Source: $(basename "$input_file")"
+          echo "3D test range: ${start_seconds}s + ${duration_seconds}s"
+          echo "Output: $output_name"
+
+          echo "input_file=$input_file" >> "$GITHUB_OUTPUT"
+          echo "start_seconds=$start_seconds" >> "$GITHUB_OUTPUT"
+          echo "duration_seconds=$duration_seconds" >> "$GITHUB_OUTPUT"
+          echo "output_name=$output_name" >> "$GITHUB_OUTPUT"
+
+      - name: Create AI depth stereo Full-SBS
+        id: convert
+        env:
+          PYTORCH_ENABLE_MPS_FALLBACK: "1"
+          INPUT_FILE: ${{ steps.input.outputs.input_file }}
+          START_SECONDS: ${{ steps.input.outputs.start_seconds }}
+          DURATION_SECONDS: ${{ steps.input.outputs.duration_seconds }}
+          OUTPUT_NAME: ${{ steps.input.outputs.output_name }}
+        run: |
+          set -euo pipefail
+
+          output_file="$RUNNER_TEMP/$OUTPUT_NAME"
+
+          python3 tools/ai_stereo_3d.py \
+            --input "$INPUT_FILE" \
+            --output "$output_file" \
+            --start "$START_SECONDS" \
+            --duration "$DURATION_SECONDS" \
+            --width 1280 \
+            --height 720 \
+            --fps 30 \
+            --strength 0.018
+
+          [ -s "$output_file" ] || {
+            echo "::error::3D output was not created."
+            exit 1
+          }
+
+          size_bytes=$(stat -f '%z' "$output_file")
+          echo "output_file=$output_file" >> "$GITHUB_OUTPUT"
+          echo "size_bytes=$size_bytes" >> "$GITHUB_OUTPUT"
+
+      - name: Upload 3D test to Google Drive
+        id: upload
+        env:
+          OUTPUT_FILE: ${{ steps.convert.outputs.output_file }}
+          OUTPUT_NAME: ${{ steps.input.outputs.output_name }}
+        run: |
+          set -euo pipefail
+
+          rclone mkdir "drive:${DEST_FOLDER%/}"
+          dest="${DEST_FOLDER%/}/$OUTPUT_NAME"
+
+          rclone copyto "$OUTPUT_FILE" "drive:$dest" \
+            --drive-chunk-size 256M \
+            --tpslimit 8 --tpslimit-burst 8 \
+            --stats 10s --stats-one-line \
+            --retries 10 --low-level-retries 30
+
+          final_size=$(rclone size --json "drive:$dest" | jq -r '.bytes // 0')
+          [ "$final_size" -gt 0 ] || {
+            echo "::error::Uploaded 3D file is missing."
+            exit 1
+          }
+
+          echo "dest=$dest" >> "$GITHUB_OUTPUT"
+          echo "final_size=$final_size" >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        env:
+          DEST: ${{ steps.upload.outputs.dest }}
+          FINAL_SIZE: ${{ steps.upload.outputs.final_size }}
+          START_SECONDS: ${{ steps.input.outputs.start_seconds }}
+          DURATION_SECONDS: ${{ steps.input.outputs.duration_seconds }}
+        run: |
+          size_mb=$(python3 -c 'import sys; print(round(int(sys.argv[1])/1000000,1))' "$FINAL_SIZE")
+          {
+            echo "## Quest 3 AI stereo test complete"
+            echo "- Output: `$DEST`"
+            echo "- Format: Full-SBS Left/Right"
+            echo "- Resolution: 2560x720 (1280x720 per eye)"
+            echo "- Encoder: Apple VideoToolbox H.264"
+            echo "- Depth: Depth Anything V2 Small"
+            echo "- Clip: ${START_SECONDS}s to $(( START_SECONDS + DURATION_SECONDS ))s"
+            echo "- Size: ${size_mb} MB"
+            echo "- Quest player mode: 3D Side-by-Side / Left-Right"
+          } >> "$GITHUB_STEP_SUMMARY"
