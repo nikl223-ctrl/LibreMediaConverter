@@ -115,10 +115,9 @@ def key(obj, frame, location=None, rotation=None, scale=None):
         obj.keyframe_insert('scale', frame=frame)
 
 def linearize(obj):
-    if obj.animation_data and obj.animation_data.action:
-        for fc in obj.animation_data.action.fcurves:
-            for kp in fc.keyframe_points:
-                kp.interpolation = 'BEZIER'
+    # Blender 5.x stores animation data in layered Actions.
+    # Default keyframe interpolation is already smooth enough for the trailer.
+    return
 
 def make_target(name, loc):
     bpy.ops.object.empty_add(type='PLAIN_AXES', location=loc)
