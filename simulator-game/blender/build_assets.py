@@ -97,7 +97,15 @@ def text_obj(name, text, loc, size, mat, rot=(math.radians(90),0,0), extrude=0.0
     return o
 
 def export_asset(name):
-    # Apply modifiers for predictable mobile geometry.
+    # Convert text/curves, apply modifiers and join the static asset into one mesh.
+    # This keeps the rich material layout but drastically cuts Godot node/draw overhead.
+    for obj in list(bpy.context.scene.objects):
+        if obj.type in {"FONT", "CURVE"}:
+            bpy.context.view_layer.objects.active = obj
+            obj.select_set(True)
+            bpy.ops.object.convert(target="MESH")
+            obj.select_set(False)
+
     for obj in list(bpy.context.scene.objects):
         if obj.type == "MESH":
             bpy.context.view_layer.objects.active = obj
@@ -108,6 +116,16 @@ def export_asset(name):
                 except Exception:
                     pass
             obj.select_set(False)
+
+    meshes = [o for o in bpy.context.scene.objects if o.type == "MESH"]
+    bpy.ops.object.select_all(action="DESELECT")
+    for obj in meshes:
+        obj.select_set(True)
+    if meshes:
+        bpy.context.view_layer.objects.active = meshes[0]
+        bpy.ops.object.join()
+        meshes[0].name = name
+
     blend_path = SOURCES / f"{name}.blend"
     glb_path = MODELS / f"{name}.glb"
     bpy.ops.wm.save_as_mainfile(filepath=str(blend_path))
