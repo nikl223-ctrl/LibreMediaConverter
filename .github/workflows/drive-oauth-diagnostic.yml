@@ -1,0 +1,55 @@
+name: Drive OAuth Project Diagnostic
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "drive-oauth-diagnostic-request.txt"
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Compare OAuth client project with Drive error project
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          for var in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET GOOGLE_REFRESH_TOKEN; do
+            if [ -z "${!var:-}" ]; then
+              echo "::error::Missing GitHub secret: $var"
+              exit 1
+            fi
+          done
+
+          client_prefix="${GOOGLE_CLIENT_ID%%-*}"
+          echo "OAuth client numeric prefix: $client_prefix"
+          echo "Project number reported by Drive error: 202264815644"
+
+          if [ "$client_prefix" = "202264815644" ]; then
+            echo "MATCH: GitHub is using an OAuth client from the same project that Drive rate-limited."
+          else
+            echo "MISMATCH: GitHub OAuth client prefix does NOT match the project number in the Drive error."
+          fi
+
+          token_response=$(curl -fsS --request POST             --data-urlencode "client_id=$GOOGLE_CLIENT_ID"             --data-urlencode "client_secret=$GOOGLE_CLIENT_SECRET"             --data-urlencode "refresh_token=$GOOGLE_REFRESH_TOKEN"             --data-urlencode "grant_type=refresh_token"             https://oauth2.googleapis.com/token)
+
+          access_token=$(printf '%s' "$token_response" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("access_token",""))')
+          if [ -z "$access_token" ]; then
+            echo "::error::Could not refresh OAuth token."
+            exit 1
+          fi
+
+          echo "::add-mask::$access_token"
+          info=$(curl -fsS "https://oauth2.googleapis.com/tokeninfo?access_token=$access_token")
+          aud=$(printf '%s' "$info" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("aud",""))')
+          scope=$(printf '%s' "$info" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("scope",""))')
+
+          aud_prefix="${aud%%-*}"
+          echo "Access-token audience numeric prefix: $aud_prefix"
+          echo "Drive scope present: $(printf '%s' "$scope" | grep -q 'drive' && echo yes || echo no)"
