@@ -299,6 +299,7 @@ jobs:
             -progress "$progress_fifo" \
             -i "$INPUT_FILE" \
             -map 0:v:0 -map '0:a?' \
+            -fps_mode passthrough \
             -vf "scale=3840:2160:force_original_aspect_ratio=decrease,pad=3840:2160:(ow-iw)/2:(oh-ih)/2,setsar=1" \
             -c:v libx264 \
             -preset ultrafast \
