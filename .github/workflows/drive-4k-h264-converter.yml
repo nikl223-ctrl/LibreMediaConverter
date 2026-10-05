@@ -114,6 +114,30 @@ jobs:
 
           raw=$(sed -n '1p' "$request_file" | tr -d '\r\n\t ')
 
+          # Optional per-request settings. Existing request files continue to use
+          # the normal ~28 GB target, stereo AAC 192k and 30 GB limit.
+          video_mbit=$(sed -n 's/^VIDEO_BITRATE_MBIT=//p' "$request_file" | tail -n 1 | tr -d '\r\n\t ' || true)
+          audio_channels=$(sed -n 's/^AUDIO_CHANNELS=//p' "$request_file" | tail -n 1 | tr -d '\r\n\t ' || true)
+          audio_bitrate=$(sed -n 's/^AUDIO_BITRATE=//p' "$request_file" | tail -n 1 | tr -d '\r\n\t ' || true)
+          request_max_output_bytes=$(sed -n 's/^MAX_OUTPUT_BYTES=//p' "$request_file" | tail -n 1 | tr -d '\r\n\t ' || true)
+
+          [ -n "$audio_channels" ] || audio_channels=2
+          [ -n "$audio_bitrate" ] || audio_bitrate=192k
+          [ -n "$request_max_output_bytes" ] || request_max_output_bytes="$MAX_OUTPUT_BYTES"
+
+          if [ -n "$video_mbit" ] && ! [[ "$video_mbit" =~ ^[0-9]+$ ]]; then
+            echo "::error::VIDEO_BITRATE_MBIT must be an integer."
+            exit 1
+          fi
+          if ! [[ "$audio_channels" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::AUDIO_CHANNELS must be a positive integer."
+            exit 1
+          fi
+          if ! [[ "$request_max_output_bytes" =~ ^[0-9]+$ ]]; then
+            echo "::error::MAX_OUTPUT_BYTES must be an integer."
+            exit 1
+          fi
+
           if [[ "$raw" =~ /d/([^/?]+) ]]; then
             file_id="${BASH_REMATCH[1]}"
           elif [[ "$raw" =~ [\?\&]id=([^\&]+) ]]; then
@@ -154,11 +178,16 @@ jobs:
 
           echo "input_file=$input_file" >> "$GITHUB_OUTPUT"
           echo "download_mbps=$avg_mbps" >> "$GITHUB_OUTPUT"
+          echo "video_mbit=$video_mbit" >> "$GITHUB_OUTPUT"
+          echo "audio_channels=$audio_channels" >> "$GITHUB_OUTPUT"
+          echo "audio_bitrate=$audio_bitrate" >> "$GITHUB_OUTPUT"
+          echo "max_output_bytes=$request_max_output_bytes" >> "$GITHUB_OUTPUT"
 
       - name: Probe source and calculate bitrate
         id: probe
         env:
           INPUT_FILE: ${{ steps.input.outputs.input_file }}
+          CUSTOM_VIDEO_MBIT: ${{ steps.input.outputs.video_mbit }}
         run: |
           set -euo pipefail
 
@@ -169,9 +198,13 @@ jobs:
 
           python3 -c 'import math,sys; d=float(sys.argv[1]); assert d>0 and math.isfinite(d)' "$duration"
 
-          video_bps=$(python3 -c \
-            'import sys; d=float(sys.argv[1]); t=int(sys.argv[2]); a=192000; print(max(500000,min(int((t*8/d)*0.985-a),100000000)))' \
-            "$duration" "$TARGET_BYTES")
+          if [ -n "${CUSTOM_VIDEO_MBIT:-}" ]; then
+            video_bps=$(( CUSTOM_VIDEO_MBIT * 1000000 ))
+          else
+            video_bps=$(python3 -c \
+              'import sys; d=float(sys.argv[1]); t=int(sys.argv[2]); a=192000; print(max(500000,min(int((t*8/d)*0.985-a),100000000)))' \
+              "$duration" "$TARGET_BYTES")
+          fi
 
           base=$(basename "$INPUT_FILE")
           stem="${base%.*}"
@@ -204,6 +237,9 @@ jobs:
           OUTPUT_NAME: ${{ steps.probe.outputs.output_name }}
           VIDEO_BPS: ${{ steps.probe.outputs.video_bps }}
           SOURCE_DURATION: ${{ steps.probe.outputs.duration }}
+          AUDIO_CHANNELS: ${{ steps.input.outputs.audio_channels }}
+          AUDIO_BITRATE: ${{ steps.input.outputs.audio_bitrate }}
+          OUTPUT_LIMIT_BYTES: ${{ steps.input.outputs.max_output_bytes }}
         run: |
           set -euo pipefail
 
@@ -305,8 +341,9 @@ jobs:
 
           final_size=$(rclone size --json "drive:$dest_path" | jq -r '.bytes // 0')
 
-          if [ "$final_size" -le 0 ] || [ "$final_size" -gt "$MAX_OUTPUT_BYTES" ]; then
-            echo "::error::Final file size invalid or above 30 GB."
+          if [ "$final_size" -le 0 ] || [ "$final_size" -gt "$OUTPUT_LIMIT_BYTES" ]; then
+            limit_gb=$(python3 -c 'import sys; print(round(int(sys.argv[1])/1000000000,3))' "$OUTPUT_LIMIT_BYTES")
+            echo "::error::Final file size invalid or above configured limit of $limit_gb GB."
             exit 1
           fi
 
@@ -318,6 +355,9 @@ jobs:
           DEST_PATH: ${{ steps.convert.outputs.dest_path }}
           FINAL_SIZE: ${{ steps.convert.outputs.final_size }}
           DOWNLOAD_MBPS: ${{ steps.input.outputs.download_mbps }}
+          AUDIO_CHANNELS: ${{ steps.input.outputs.audio_channels }}
+          AUDIO_BITRATE: ${{ steps.input.outputs.audio_bitrate }}
+          VIDEO_BPS: ${{ steps.probe.outputs.video_bps }}
         run: |
           size_gb=$(python3 -c 'import sys; print(round(int(sys.argv[1])/1000000000,3))' "$FINAL_SIZE")
 
@@ -325,8 +365,8 @@ jobs:
             echo "## 4K H.264 conversion complete"
             echo "- Output: \`$DEST_PATH\`"
             echo "- Size: $size_gb GB"
-            echo "- Video: 3840x2160 H.264"
+            echo "- Video: 3840x2160 H.264 @ $(( VIDEO_BPS / 1000000 )) Mbit/s"
             echo "- Preset: ultrafast"
-            echo "- Audio: AAC 192 kbit/s"
+            echo "- Audio: AAC $AUDIO_BITRATE, $AUDIO_CHANNELS channels"
             echo "- Average source download: $DOWNLOAD_MBPS Mbit/s"
           } >> "$GITHUB_STEP_SUMMARY"
