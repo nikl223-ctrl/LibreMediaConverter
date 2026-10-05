@@ -1,5 +1,6 @@
 import bpy
 import math
+import os
 from mathutils import Vector
 
 # ------------------------------------------------------------
@@ -26,12 +27,10 @@ scene.render.engine = 'BLENDER_EEVEE'
 scene.render.resolution_x = 1280
 scene.render.resolution_y = 720
 scene.render.resolution_percentage = 100
-scene.render.image_settings.file_format = 'FFMPEG'
-scene.render.ffmpeg.format = 'MPEG4'
-scene.render.ffmpeg.codec = 'H264'
-scene.render.ffmpeg.constant_rate_factor = 'MEDIUM'
-scene.render.ffmpeg.ffmpeg_preset = 'GOOD'
-scene.render.filepath = '/tmp/dog_trailer.mp4'
+os.makedirs('/tmp/dog_frames', exist_ok=True)
+scene.render.image_settings.file_format = 'PNG'
+scene.render.image_settings.color_mode = 'RGB'
+scene.render.filepath = '/tmp/dog_frames/frame_'
 scene.render.film_transparent = False
 
 world = bpy.data.worlds.new('CinemaWorld') if not bpy.data.worlds else bpy.data.worlds[0]
@@ -397,4 +396,4 @@ for c in (cam1,cam2,cam3,cam4,cam5):
 bpy.ops.wm.save_as_mainfile(filepath='/tmp/dog_trailer_scene.blend')
 print('Rendering cinematic trailer...')
 bpy.ops.render.render(animation=True)
-print('DONE:/tmp/dog_trailer.mp4')
+print('DONE:/tmp/dog_frames')
