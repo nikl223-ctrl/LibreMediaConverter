@@ -10,6 +10,7 @@ on:
     paths-ignore:
       - "conversion-requests-h264/**"
       - "conversion-requests/**"
+      - "conversion-requests-macos/**"
       - "cancel-h264-run.txt"
       - "cpu-probe.txt"
       - ".github/workflows/cpu-probe.yml"
