@@ -32,6 +32,47 @@ jobs:
         with:
           packages: platform-tools
 
+      - name: Cache HD game assets
+        id: asset-cache
+        uses: actions/cache@v4
+        with:
+          path: simulator-game/assets
+          key: roadlife-hd-assets-v2
+
+      - name: Download CC0 4K PBR textures and vehicle audio
+        if: steps.asset-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p simulator-game/assets/pbr simulator-game/assets/audio
+
+          fetch_texture () {
+            ASSET="$1"
+            DIR="simulator-game/assets/pbr/$ASSET"
+            mkdir -p "$DIR"
+            BASE="https://dl.polyhaven.org/file/ph-assets/Textures/jpg/4k/$ASSET/$ASSET"
+            curl --retry 4 --fail --location "$BASE"_diff_4k.jpg   -o "$DIR/$ASSET"_diff_4k.jpg
+            curl --retry 4 --fail --location "$BASE"_nor_gl_4k.jpg -o "$DIR/$ASSET"_nor_gl_4k.jpg
+            curl --retry 4 --fail --location "$BASE"_rough_4k.jpg  -o "$DIR/$ASSET"_rough_4k.jpg
+          }
+
+          fetch_texture asphalt_01
+          fetch_texture grass_ground
+          fetch_texture concrete_wall_009
+          fetch_texture red_brick
+          fetch_texture brick_pavement_04
+
+          curl --retry 4 --fail --location "https://opengameart.org/sites/default/files/engine_start_up_01.wav" -o simulator-game/assets/audio/engine_start.wav
+          curl --retry 4 --fail --location "https://opengameart.org/sites/default/files/loop_0.wav" -o simulator-game/assets/audio/engine_low.wav
+          curl --retry 4 --fail --location "https://opengameart.org/sites/default/files/loop_4.wav" -o simulator-game/assets/audio/engine_high.wav
+          curl --retry 4 --fail --location "https://opengameart.org/sites/default/files/car1.wav" -o simulator-game/assets/audio/road.wav
+          curl --retry 4 --fail --location "https://opengameart.org/sites/default/files/wind%20woosh%20loop.ogg" -o simulator-game/assets/audio/wind.ogg
+          curl --retry 4 --fail --location "https://opengameart.org/sites/default/files/bangs.wav" -o simulator-game/assets/audio/impact.wav
+
+          echo "Downloaded HD asset size:"
+          du -sh simulator-game/assets
+          find simulator-game/assets -type f -printf '%p %k KB\n' | sort
+
       - name: Export with Godot 4.7.2
         id: export
         uses: firebelley/godot-export@v8.0.0
