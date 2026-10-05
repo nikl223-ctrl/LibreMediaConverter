@@ -1,0 +1,116 @@
+name: Render Blender Dog Trailer
+
+on:
+  push:
+    branches:
+      - blender-dog-trailer
+    paths:
+      - "blender-trailers/dog-buyer/**"
+      - ".github/workflows/render-dog-trailer.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install render dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgl1-mesa-dri mesa-utils ffmpeg xz-utils
+
+      - name: Cache Blender 5.2.2
+        id: blender-cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/blender
+          key: blender-5.2.2-linux-x64-trailer
+
+      - name: Download Blender 5.2.2
+        if: steps.blender-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .cache/blender
+          curl --retry 4 --fail --location             "https://download.blender.org/release/Blender5.2/blender-5.2.2-linux-x64.tar.xz"             -o .cache/blender/blender.tar.xz
+          tar -xJf .cache/blender/blender.tar.xz -C .cache/blender
+          rm .cache/blender/blender.tar.xz
+
+      - name: Render trailer in Blender Eevee
+        shell: bash
+        run: |
+          set -euo pipefail
+          BLENDER=".cache/blender/blender-5.2.2-linux-x64/blender"
+          xvfb-run -a "$BLENDER" --background --factory-startup             --python blender-trailers/dog-buyer/trailer.py
+          test -s /tmp/dog_trailer.mp4
+          test -s /tmp/dog_trailer_scene.blend
+          ls -lh /tmp/dog_trailer.mp4 /tmp/dog_trailer_scene.blend
+
+      - name: Create cinematic audio bed
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import math, wave, struct
+          sr=44100
+          dur=12.0
+          n=int(sr*dur)
+          hits=[0.25,3.0,5.55,8.1,10.65]
+          with wave.open('/tmp/trailer_audio.wav','w') as w:
+              w.setnchannels(2)
+              w.setsampwidth(2)
+              w.setframerate(sr)
+              for i in range(n):
+                  t=i/sr
+                  fade=min(1.0,t/1.2,(dur-t)/1.2)
+                  drone=(0.15*math.sin(2*math.pi*55*t)+
+                         0.08*math.sin(2*math.pi*82.5*t)+
+                         0.04*math.sin(2*math.pi*110*t))
+                  pulse=0.0
+                  for h in hits:
+                      dt=t-h
+                      if 0 <= dt < 0.55:
+                          pulse += 0.44*math.exp(-7.2*dt)*math.sin(2*math.pi*(72-24*dt)*dt)
+                  rise=0.035*math.sin(2*math.pi*(180+42*t)*t)*(max(0,t-8.0)/4.0)
+                  s=max(-0.92,min(0.92,(drone+pulse+rise)*fade))
+                  v=int(s*32767)
+                  w.writeframesraw(struct.pack('<hh',v,v))
+          PY
+
+      - name: Mux audio and package files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          ffmpeg -y -i /tmp/dog_trailer.mp4 -i /tmp/trailer_audio.wav             -c:v copy -c:a aac -b:a 192k -shortest             dist/Der-Erste-Blick-Blender-Trailer.mp4
+          cp /tmp/dog_trailer_scene.blend dist/Der-Erste-Blick-Scene.blend
+          ls -lh dist/*
+
+      - name: Publish trailer release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dog-trailer-latest
+          name: Blender Trailer - Der erste Blick
+          prerelease: true
+          make_latest: false
+          files: |
+            dist/Der-Erste-Blick-Blender-Trailer.mp4
+            dist/Der-Erste-Blick-Scene.blend
+          fail_on_unmatched_files: true
+
+      - name: Upload trailer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Blender-Dog-Trailer
+          path: |
+            dist/Der-Erste-Blick-Blender-Trailer.mp4
+            dist/Der-Erste-Blick-Scene.blend
+          if-no-files-found: error
+          retention-days: 30
