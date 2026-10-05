@@ -11,6 +11,7 @@ on:
       - "conversion-requests-h264/**"
       - "conversion-requests/**"
       - "conversion-requests-macos/**"
+      - "conversion-requests-3d/**"
       - "cancel-h264-run.txt"
       - "cpu-probe.txt"
       - ".github/workflows/cpu-probe.yml"
