@@ -36,7 +36,10 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends ffmpeg rclone jq curl ca-certificates
+          sudo apt-get install -y --no-install-recommends ffmpeg jq curl ca-certificates unzip
+          curl -fsSL https://rclone.org/install.sh | sudo bash
+          echo "=== rclone version ==="
+          rclone version
 
       - name: Configure Google Drive
         env:
@@ -52,6 +55,16 @@ jobs:
               exit 1
             fi
           done
+
+          # 202264815644 is rclone's public shared OAuth client project.
+          # Using it means sharing Google's API quota with every other rclone user.
+          client_project="${GOOGLE_CLIENT_ID%%-*}"
+          if [ "$client_project" = "202264815644" ]; then
+            echo "::error::GOOGLE_CLIENT_ID is rclone's shared OAuth client. Replace GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REFRESH_TOKEN with credentials/token from your own Google Cloud project before running conversions."
+            exit 1
+          fi
+
+          echo "Using private Google OAuth project prefix: $client_project"
 
           token_response=$(curl -fsS --request POST \
             --data-urlencode "client_id=$GOOGLE_CLIENT_ID" \
