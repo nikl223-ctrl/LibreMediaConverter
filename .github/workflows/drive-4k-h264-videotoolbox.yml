@@ -77,12 +77,7 @@ jobs:
           [ -n "$access_token" ] || { echo "::error::OAuth refresh failed."; exit 1; }
           echo "::add-mask::$access_token"
 
-          expiry=$(python3 - "$expires_in" <<'PY'
-import sys,datetime
-s=int(sys.argv[1])
-print((datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(seconds=s)).strftime("%Y-%m-%dT%H:%M:%SZ"))
-PY
-          )
+          expiry=$(python3 -c 'import sys,datetime; s=int(sys.argv[1]); print((datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(seconds=s)).strftime("%Y-%m-%dT%H:%M:%SZ"))' "$expires_in")
 
           token_json=$(jq -cn \
             --arg at "$access_token" \
