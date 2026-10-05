@@ -1,0 +1,62 @@
+name: macOS Video Encoder Probe
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "macos-video-probe.txt"
+
+jobs:
+  probe:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Probe Apple hardware and VideoToolbox
+        run: |
+          set -uo pipefail
+          echo "=== macOS ==="
+          sw_vers
+          echo
+          echo "=== CPU ==="
+          sysctl -n machdep.cpu.brand_string 2>/dev/null || true
+          sysctl -n hw.model 2>/dev/null || true
+          sysctl -n hw.ncpu 2>/dev/null || true
+          uname -m
+          echo
+          echo "=== GPU ==="
+          system_profiler SPDisplaysDataType 2>/dev/null || true
+          echo
+          echo "=== Memory ==="
+          sysctl -n hw.memsize 2>/dev/null || true
+          echo
+          echo "=== Disk ==="
+          df -h /
+          echo
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            brew install ffmpeg
+          fi
+          echo "=== FFmpeg version ==="
+          ffmpeg -version | head -3
+          echo
+          echo "=== VideoToolbox encoders ==="
+          ffmpeg -hide_banner -encoders 2>/dev/null | grep -Ei 'videotoolbox|h264|hevc' | grep -Ei 'videotoolbox|VideoToolbox' || true
+          echo
+          echo "=== VideoToolbox 4K H264 benchmark ==="
+          set +e
+          /usr/bin/time -p ffmpeg -hide_banner -loglevel info -stats \
+            -f lavfi -i testsrc2=size=1920x1080:rate=30 \
+            -t 8 \
+            -vf "scale=3840:2160:flags=fast_bilinear" \
+            -c:v h264_videotoolbox -b:v 30M -pix_fmt yuv420p \
+            -f null - 2>&1 | tail -35
+          echo "VT_EXIT=${PIPESTATUS[0]}"
+          echo
+          echo "=== libx264 4K benchmark ==="
+          /usr/bin/time -p ffmpeg -hide_banner -loglevel info -stats \
+            -f lavfi -i testsrc2=size=1920x1080:rate=30 \
+            -t 5 \
+            -vf "scale=3840:2160:flags=fast_bilinear" \
+            -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
+            -f null - 2>&1 | tail -25
+          exit 0
