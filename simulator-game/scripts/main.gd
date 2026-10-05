@@ -173,7 +173,7 @@ func _build_city():
 					var sz = rng.randf_range(12.0, 15.0)
 					var pos = Vector3(center.x + ox, h * 0.5 + 0.16, center.z + oz)
 					var mat = building_mats[rng.randi_range(0, building_mats.size() - 1)]
-					_add_box("Building", Vector3(sx, h, sz), pos, mat, true)
+					_add_blender_building(Vector3(sx, h, sz), pos, mat, rng.randi_range(0, 1) == 0)
 
 	for ix in range(-3, 4):
 		for j in range(-6, 7):
@@ -190,6 +190,9 @@ func _build_city():
 	_add_service_pad(garage_position, Color(0.12, 0.50, 0.95), "GARAGE")
 	_add_service_pad(fuel_position, Color(0.10, 0.76, 0.36), "TANKSTELLE")
 
+	_add_blender_prop("res://assets/models/garage.glb", garage_position + Vector3(18, 0.16, 16), Vector3(1.05, 1.05, 1.05), deg_to_rad(-90.0))
+	_add_blender_prop("res://assets/models/gas_station.glb", fuel_position + Vector3(0, 0.16, 14), Vector3(0.92, 0.92, 0.92), 0.0)
+
 	for x in [-120.0, -72.0, -24.0, 24.0, 72.0, 120.0]:
 		_add_street_light(Vector3(x, 0, -7.2))
 		_add_street_light(Vector3(x, 0, 55.2))
@@ -199,6 +202,47 @@ func _build_city():
 
 	for p in [Vector3(-72, 8, -72), Vector3(72, 8, -72), Vector3(-72, 8, 72), Vector3(72, 8, 72)]:
 		_add_reflection_probe(p)
+
+func _add_blender_building(size: Vector3, pos: Vector3, fallback_mat: Material, modern: bool):
+	var root = StaticBody3D.new()
+	root.name = "BlenderBuilding"
+	root.position = pos
+	add_child(root)
+
+	var collision = CollisionShape3D.new()
+	var shape = BoxShape3D.new()
+	shape.size = size
+	collision.shape = shape
+	root.add_child(collision)
+
+	var path = "res://assets/models/building_modern.glb" if modern else "res://assets/models/building_brick.glb"
+	var base_size = Vector3(12.0, 24.0, 12.0) if modern else Vector3(14.0, 16.0, 10.0)
+	if ResourceLoader.exists(path):
+		var packed = load(path)
+		if packed is PackedScene:
+			var model = packed.instantiate()
+			model.scale = Vector3(size.x / base_size.x, size.y / base_size.y, size.z / base_size.z)
+			model.position.y = -size.y * 0.5
+			root.add_child(model)
+			return
+
+	var mesh = MeshInstance3D.new()
+	var box = BoxMesh.new()
+	box.size = size
+	mesh.mesh = box
+	mesh.material_override = fallback_mat
+	root.add_child(mesh)
+
+func _add_blender_prop(path: String, pos: Vector3, model_scale: Vector3, rotation_y: float):
+	if not ResourceLoader.exists(path):
+		return
+	var packed = load(path)
+	if packed is PackedScene:
+		var instance = packed.instantiate()
+		instance.position = pos
+		instance.scale = model_scale
+		instance.rotation.y = rotation_y
+		add_child(instance)
 
 func _add_street_light(pos):
 	var pole_mat = _material(Color(0.13, 0.14, 0.15), 0.48)
