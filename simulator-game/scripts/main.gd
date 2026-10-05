@@ -1,7 +1,7 @@
 extends Node3D
 
 const PlayerCarScript = preload("res://scripts/player_car.gd")
-const TrafficCarScript = preload("res://scripts/traffic_car.gd")
+const TrafficCarScript = preload("res://scripts/traffic_car.gd")\nconst PBRLibrary = preload("res://scripts/pbr_library.gd")
 
 var rng = RandomNumberGenerator.new()
 var player
@@ -99,38 +99,55 @@ func _add_joy_button(action_name, button_index):
 func _setup_environment():
 	world_environment = WorldEnvironment.new()
 	var env = Environment.new()
-	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(0.40, 0.63, 0.79)
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.66, 0.76, 0.86)
-	env.ambient_light_energy = 0.62
-	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+
+	var sky = Sky.new()
+	var sky_mat = ProceduralSkyMaterial.new()
+	sky_mat.sky_top_color = Color(0.12, 0.34, 0.68)
+	sky_mat.sky_horizon_color = Color(0.68, 0.78, 0.90)
+	sky_mat.ground_horizon_color = Color(0.38, 0.42, 0.43)
+	sky_mat.ground_bottom_color = Color(0.07, 0.08, 0.09)
+	sky_mat.sun_angle_max = 12.0
+	sky_mat.sun_curve = 0.09
+	sky.sky_material = sky_mat
+
+	env.background_mode = Environment.BG_SKY
+	env.sky = sky
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
+	env.ambient_light_energy = 0.72
+	env.tonemap_mode = Environment.TONE_MAPPER_ACES
+	env.glow_enabled = true
+	env.glow_intensity = 0.72
+	env.fog_enabled = true
+	env.fog_light_color = Color(0.61, 0.68, 0.73)
+	env.fog_light_energy = 0.55
+	env.fog_density = 0.0018
+	env.fog_height = 6.0
+	env.fog_height_density = 0.055
+	env.adjustment_enabled = true
+	env.adjustment_contrast = 1.06
+	env.adjustment_saturation = 1.05
 	world_environment.environment = env
 	add_child(world_environment)
 
 	sun = DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-48, -32, 0)
-	sun.light_energy = 1.2
+	sun.light_energy = 1.34
 	sun.shadow_enabled = true
-	sun.directional_shadow_max_distance = 95.0
+	sun.directional_shadow_max_distance = 140.0
+	sun.shadow_blur = 1.25
 	add_child(sun)
 
 func _create_materials():
-	asphalt_mat = _material(Color(0.085, 0.095, 0.105), 0.95)
-	sidewalk_mat = _material(Color(0.34, 0.36, 0.38), 0.92)
-	grass_mat = _material(Color(0.12, 0.34, 0.16), 0.96)
-	line_mat = _material(Color(0.88, 0.85, 0.58), 0.8)
+	asphalt_mat = PBRLibrary.material("asphalt_01", 0.18, Color(0.085, 0.095, 0.105))
+	sidewalk_mat = PBRLibrary.material("brick_pavement_04", 0.30, Color(0.34, 0.36, 0.38), Color(0.78, 0.78, 0.78))
+	grass_mat = PBRLibrary.material("grass_ground", 0.16, Color(0.12, 0.34, 0.16))
+	line_mat = _material(Color(0.95, 0.91, 0.67), 0.66)
 
-	var colors = [
-		Color(0.53, 0.58, 0.62),
-		Color(0.58, 0.43, 0.35),
-		Color(0.42, 0.50, 0.61),
-		Color(0.64, 0.61, 0.52),
-		Color(0.39, 0.44, 0.47),
-		Color(0.53, 0.46, 0.58)
-	]
-	for c in colors:
-		building_mats.append(_material(c, 0.88))
+	building_mats.append(PBRLibrary.material("concrete_wall_009", 0.23, Color(0.52, 0.54, 0.55), Color(0.92, 0.94, 0.96)))
+	building_mats.append(PBRLibrary.material("red_brick", 0.36, Color(0.50, 0.23, 0.16), Color(0.94, 0.87, 0.82)))
+	building_mats.append(PBRLibrary.material("concrete_wall_009", 0.19, Color(0.46, 0.49, 0.52), Color(0.76, 0.84, 0.92)))
+	building_mats.append(PBRLibrary.material("red_brick", 0.31, Color(0.45, 0.24, 0.18), Color(0.78, 0.80, 0.84)))
 
 func _build_city():
 	_add_box("Ground", Vector3(400, 0.2, 400), Vector3(0, -0.1, 0), grass_mat, true)
@@ -172,6 +189,58 @@ func _build_city():
 
 	_add_service_pad(garage_position, Color(0.12, 0.50, 0.95), "GARAGE")
 	_add_service_pad(fuel_position, Color(0.10, 0.76, 0.36), "TANKSTELLE")
+
+	for x in [-120.0, -72.0, -24.0, 24.0, 72.0, 120.0]:
+		_add_street_light(Vector3(x, 0, -7.2))
+		_add_street_light(Vector3(x, 0, 55.2))
+	for z in [-120.0, -72.0, -24.0, 24.0, 72.0, 120.0]:
+		_add_street_light(Vector3(-55.2, 0, z))
+		_add_street_light(Vector3(7.2, 0, z))
+
+	for p in [Vector3(-72, 8, -72), Vector3(72, 8, -72), Vector3(-72, 8, 72), Vector3(72, 8, 72)]:
+		_add_reflection_probe(p)
+
+func _add_street_light(pos):
+	var pole_mat = _material(Color(0.13, 0.14, 0.15), 0.48)
+	var lamp_mat = _material(Color(1.0, 0.77, 0.46), 0.18)
+	lamp_mat.emission_enabled = true
+	lamp_mat.emission = Color(1.0, 0.67, 0.34)
+	lamp_mat.emission_energy_multiplier = 3.2
+
+	var pole = MeshInstance3D.new()
+	var pole_mesh = CylinderMesh.new()
+	pole_mesh.top_radius = 0.08
+	pole_mesh.bottom_radius = 0.12
+	pole_mesh.height = 5.6
+	pole.mesh = pole_mesh
+	pole.position = pos + Vector3(0, 2.8, 0)
+	pole.material_override = pole_mat
+	add_child(pole)
+
+	var head = MeshInstance3D.new()
+	var head_mesh = BoxMesh.new()
+	head_mesh.size = Vector3(0.5, 0.16, 0.5)
+	head.mesh = head_mesh
+	head.position = pos + Vector3(0, 5.58, 0)
+	head.material_override = lamp_mat
+	add_child(head)
+
+	var light = OmniLight3D.new()
+	light.position = pos + Vector3(0, 5.35, 0)
+	light.omni_range = 12.0
+	light.light_energy = 0.0
+	light.light_color = Color(1.0, 0.72, 0.44)
+	light.shadow_enabled = false
+	light.set_meta("street_light", true)
+	add_child(light)
+
+func _add_reflection_probe(pos):
+	var probe = ReflectionProbe.new()
+	probe.position = pos
+	probe.size = Vector3(82, 28, 82)
+	probe.intensity = 1.12
+	probe.update_mode = ReflectionProbe.UPDATE_ONCE
+	add_child(probe)
 
 func _add_tree(pos):
 	var trunk_mat = _material(Color(0.30, 0.19, 0.10), 1.0)
@@ -343,6 +412,14 @@ func _build_ui():
 	notify_label.visible = false
 	root.add_child(notify_label)
 
+	graphics_button = Button.new()
+	graphics_button.position = Vector2(1000, 20)
+	graphics_button.size = Vector2(258, 54)
+	graphics_button.add_theme_font_size_override("font_size", 18)
+	graphics_button.pressed.connect(_cycle_graphics_quality)
+	root.add_child(graphics_button)
+	_apply_graphics_quality()
+
 	_add_touch_control(canvas, root, "◀", Vector2(102, 610), 116, "steer_left", Color(0.13, 0.28, 0.48, 0.58))
 	_add_touch_control(canvas, root, "▶", Vector2(235, 610), 116, "steer_right", Color(0.13, 0.28, 0.48, 0.58))
 	_add_touch_control(canvas, root, "GAS", Vector2(1172, 600), 128, "move_forward", Color(0.08, 0.54, 0.28, 0.62))
@@ -460,9 +537,13 @@ func _update_day_night(delta):
 
 	var day_color = Color(0.40, 0.63, 0.79)
 	var night_color = Color(0.035, 0.055, 0.10)
-	world_environment.environment.background_color = night_color.lerp(day_color, daylight)
-	world_environment.environment.ambient_light_energy = 0.20 + daylight * 0.48
+	world_environment.environment.ambient_light_energy = 0.22 + daylight * 0.54
+	world_environment.environment.fog_light_color = night_color.lerp(day_color, daylight)
 	player.set_headlights(daylight < 0.24)
+
+	for child in get_children():
+		if child is OmniLight3D and child.has_meta("street_light"):
+			child.light_energy = (1.0 - daylight) * 2.4
 
 func _update_mission():
 	var target = mission_pickup if mission_phase == 0 else mission_dropoff
@@ -516,6 +597,37 @@ func _update_hud():
 
 	if garage_panel.visible:
 		_update_garage_buttons()
+
+func _cycle_graphics_quality():
+	graphics_quality = (graphics_quality + 1) % 3
+	_apply_graphics_quality()
+
+func _apply_graphics_quality():
+	var viewport = get_viewport()
+	if graphics_quality == 0:
+		viewport.msaa_3d = Viewport.MSAA_2X
+		viewport.scaling_3d_scale = 0.78
+		sun.directional_shadow_max_distance = 72.0
+		graphics_button.text = "GRAFIK: PERFORMANCE"
+	elif graphics_quality == 1:
+		viewport.msaa_3d = Viewport.MSAA_4X
+		viewport.scaling_3d_scale = 0.90
+		sun.directional_shadow_max_distance = 105.0
+		graphics_button.text = "GRAFIK: HIGH"
+	else:
+		viewport.msaa_3d = Viewport.MSAA_4X
+		viewport.scaling_3d_scale = 1.0
+		sun.directional_shadow_max_distance = 140.0
+		graphics_button.text = "GRAFIK: ULTRA"
+
+func _graphics_name():
+	match graphics_quality:
+		0:
+			return "Performance"
+		1:
+			return "High"
+		_:
+			return "Ultra"
 
 func _handle_interact():
 	var d_garage = player.global_position.distance_to(garage_position)
