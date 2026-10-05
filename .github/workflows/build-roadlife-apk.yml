@@ -69,9 +69,40 @@ jobs:
           curl --retry 4 --fail --location "https://opengameart.org/sites/default/files/wind%20woosh%20loop.ogg" -o simulator-game/assets/audio/wind.ogg
           curl --retry 4 --fail --location "https://opengameart.org/sites/default/files/bangs.wav" -o simulator-game/assets/audio/impact.wav
 
-          echo "Downloaded HD asset size:"
-          du -sh simulator-game/assets
-          find simulator-game/assets -type f -printf '%p %k KB\n' | sort
+      - name: Cache Blender 5.2.2
+        id: blender-cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/blender
+          key: blender-5.2.2-linux-x64
+
+      - name: Download Blender 5.2.2 LTS
+        if: steps.blender-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .cache/blender
+          curl --retry 4 --fail --location             "https://download.blender.org/release/Blender5.2/blender-5.2.2-linux-x64.tar.xz"             -o .cache/blender/blender.tar.xz
+          tar -xJf .cache/blender/blender.tar.xz -C .cache/blender
+          rm .cache/blender/blender.tar.xz
+
+      - name: Build Blender graphics
+        shell: bash
+        run: |
+          set -euo pipefail
+          BLENDER=".cache/blender/blender-5.2.2-linux-x64/blender"
+          test -x "$BLENDER"
+          "$BLENDER" --background --factory-startup             --python simulator-game/blender/build_assets.py
+          echo "Generated Blender/GLB assets:"
+          find simulator-game/assets/models simulator-game/blender/generated -maxdepth 1 -type f -printf '%p %k KB\n' | sort
+
+      - name: Pack Blender source files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          zip -9 -j dist/RoadLifeSimulator-BlenderSources.zip simulator-game/blender/generated/*.blend
+          ls -lh dist/RoadLifeSimulator-BlenderSources.zip
 
       - name: Export with Godot 4.7.2
         id: export
@@ -87,6 +118,7 @@ jobs:
       - name: Collect APK
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p dist
           APK="$(find "$BUILD_DIR" -type f -name '*.apk' | head -n 1)"
           if [ -z "$APK" ]; then
@@ -107,7 +139,9 @@ jobs:
           name: RoadLife Simulator HD - Latest
           prerelease: true
           make_latest: false
-          files: dist/RoadLifeSimulator-HD-S24Ultra.apk
+          files: |
+            dist/RoadLifeSimulator-HD-S24Ultra.apk
+            dist/RoadLifeSimulator-BlenderSources.zip
           fail_on_unmatched_files: true
 
       - name: Upload APK artifact
@@ -115,5 +149,13 @@ jobs:
         with:
           name: RoadLifeSimulator-APK
           path: dist/RoadLifeSimulator-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Blender source artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RoadLifeSimulator-BlenderSources
+          path: dist/RoadLifeSimulator-BlenderSources.zip
           if-no-files-found: error
           retention-days: 30
