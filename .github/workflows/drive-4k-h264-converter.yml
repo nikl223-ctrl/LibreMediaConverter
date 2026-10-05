@@ -309,7 +309,8 @@ jobs:
             -maxrate "$maxrate" \
             -bufsize "$bufsize" \
             -c:a aac \
-            -b:a 192k \
+            -ac "$AUDIO_CHANNELS" \
+            -b:a "$AUDIO_BITRATE" \
             -movflags +frag_keyframe+empty_moov+default_base_moof \
             -f mp4 pipe:1 \
             2> >(stdbuf -oL sed -u 's/^/[ffmpeg] /' >&2) \
