@@ -1,4 +1,4 @@
-name: CPU Probe
+name: Runner Hardware Probe
 
 on:
   push:
@@ -10,10 +10,48 @@ on:
 jobs:
   probe:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - name: Show CPU
+      - name: Probe CPU GPU and video encoders
         run: |
-          echo "=== lscpu ==="
-          lscpu
-          echo "=== /proc/cpuinfo model names ==="
-          grep -m 4 '^model name' /proc/cpuinfo || true
+          set -uo pipefail
+
+          echo "=== CPU ==="
+          lscpu | grep -E 'Model name|CPU\(s\)|Thread|Core|Socket|CPU max MHz' || true
+          echo
+          echo "=== Memory ==="
+          free -h || true
+          echo
+          echo "=== Disk ==="
+          df -h / /mnt 2>/dev/null || df -h /
+          echo
+          echo "=== PCI display devices ==="
+          lspci 2>/dev/null | grep -Ei 'vga|3d|display|graphics' || echo "No PCI display/GPU device found"
+          echo
+          echo "=== DRM / GPU device nodes ==="
+          ls -la /dev/dri 2>/dev/null || echo "No /dev/dri"
+          ls -la /dev/nvidia* 2>/dev/null || echo "No /dev/nvidia devices"
+          echo
+          echo "=== NVIDIA ==="
+          nvidia-smi 2>/dev/null || echo "nvidia-smi unavailable / no NVIDIA GPU"
+          echo
+          echo "=== AMD ROCm ==="
+          rocminfo 2>/dev/null | head -80 || echo "rocminfo unavailable / no ROCm GPU"
+          echo
+          echo "=== VAAPI ==="
+          vainfo 2>/dev/null | head -100 || echo "vainfo unavailable / no VAAPI device"
+          echo
+          echo "=== FFmpeg hardware APIs ==="
+          ffmpeg -hide_banner -hwaccels 2>&1 || true
+          echo
+          echo "=== FFmpeg hardware H264/HEVC encoders ==="
+          ffmpeg -hide_banner -encoders 2>/dev/null | grep -Ei 'h264_(nvenc|vaapi|qsv|amf)|hevc_(nvenc|vaapi|qsv|amf)|videotoolbox' || echo "No hardware H264/HEVC encoder exposed"
+          echo
+          echo "=== CPU 4K H264 quick benchmark ==="
+          /usr/bin/time -f 'BENCH_REAL=%e sec\nBENCH_CPU=%P\nBENCH_MAXRSS=%M KB' \
+            ffmpeg -hide_banner -loglevel info -stats \
+              -f lavfi -i testsrc2=size=1920x1080:rate=30 \
+              -t 5 \
+              -vf "scale=3840:2160:flags=fast_bilinear" \
+              -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
+              -f null - 2>&1 | tail -25
