@@ -265,13 +265,16 @@ jobs:
             -f mp4 pipe:1 \
             2> >(stdbuf -oL sed -u 's/^/[ffmpeg] /' >&2) \
           | rclone rcat "drive:$dest_path" \
-              --drive-chunk-size 64M \
+              --drive-chunk-size 256M \
+              --tpslimit 8 \
+              --tpslimit-burst 8 \
               --stats 10s \
               --stats-one-line \
               --stats-log-level NOTICE \
               --log-level NOTICE \
-              --retries 5 \
-              --low-level-retries 20
+              --retries 10 \
+              --retries-sleep 10s \
+              --low-level-retries 50
 
           pipe_status=( "${PIPESTATUS[@]}" )
           wait "$progress_pid" >/dev/null 2>&1 || true
