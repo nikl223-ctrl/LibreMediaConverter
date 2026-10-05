@@ -1,6 +1,8 @@
 extends CharacterBody3D
 class_name TrafficCar
 
+const BLENDER_CAR := "res://assets/models/sport_sedan.glb"
+
 var route := []
 var route_index := 0
 var cruise_speed := 9.0
@@ -50,29 +52,40 @@ func _physics_process(delta):
 	move_and_slide()
 
 func _build_visuals(car_color):
-	var body_mat = StandardMaterial3D.new()
-	body_mat.albedo_color = car_color
-	body_mat.roughness = 0.78
+	var loaded := false
+	if ResourceLoader.exists(BLENDER_CAR):
+		var packed = load(BLENDER_CAR)
+		if packed is PackedScene:
+			var model = packed.instantiate()
+			model.scale = Vector3(0.92, 0.92, 0.92)
+			add_child(model)
+			loaded = true
 
-	var glass_mat = StandardMaterial3D.new()
-	glass_mat.albedo_color = Color(0.07, 0.10, 0.13)
-	glass_mat.roughness = 0.22
+	if not loaded:
+		var body_mat = StandardMaterial3D.new()
+		body_mat.albedo_color = car_color
+		body_mat.metallic = 0.52
+		body_mat.roughness = 0.28
 
-	var body = MeshInstance3D.new()
-	var box = BoxMesh.new()
-	box.size = Vector3(1.75, 0.5, 3.75)
-	body.mesh = box
-	body.position.y = 0.62
-	body.material_override = body_mat
-	add_child(body)
+		var glass_mat = StandardMaterial3D.new()
+		glass_mat.albedo_color = Color(0.04, 0.08, 0.12)
+		glass_mat.roughness = 0.16
 
-	var cabin = MeshInstance3D.new()
-	var cabin_box = BoxMesh.new()
-	cabin_box.size = Vector3(1.5, 0.58, 1.75)
-	cabin.mesh = cabin_box
-	cabin.position = Vector3(0, 1.12, 0.08)
-	cabin.material_override = glass_mat
-	add_child(cabin)
+		var body = MeshInstance3D.new()
+		var box = BoxMesh.new()
+		box.size = Vector3(1.75, 0.5, 3.75)
+		body.mesh = box
+		body.position.y = 0.62
+		body.material_override = body_mat
+		add_child(body)
+
+		var cabin = MeshInstance3D.new()
+		var cabin_box = BoxMesh.new()
+		cabin_box.size = Vector3(1.5, 0.58, 1.75)
+		cabin.mesh = cabin_box
+		cabin.position = Vector3(0, 1.12, 0.08)
+		cabin.material_override = glass_mat
+		add_child(cabin)
 
 	var shape_node = CollisionShape3D.new()
 	var shape = BoxShape3D.new()
