@@ -4,6 +4,7 @@ class_name PlayerCar
 signal crashed(severity)
 
 const PBRLibrary = preload("res://scripts/pbr_library.gd")
+const BLENDER_CAR := "res://assets/models/sport_sedan.glb"
 
 var speed := 0.0
 var fuel := 45.0
@@ -17,8 +18,6 @@ var armor_level := 0
 
 var controls_locked := false
 var crash_cooldown := 0.0
-var wheels := []
-var front_wheels := []
 var headlights := []
 var brake_lights := []
 var camera: Camera3D
@@ -48,62 +47,23 @@ func _build_visuals():
 	body_visual.name = "CarVisual"
 	add_child(body_visual)
 
-	var paint = PBRLibrary.paint(Color(0.025, 0.20, 0.68), 0.84, 0.17)
-	var glass = PBRLibrary.glass()
-	var dark = _material(Color(0.018, 0.021, 0.026), 0.56, 0.15)
-	var rubber = _material(Color(0.015, 0.017, 0.018), 0.96, 0.0)
-	var chrome = _material(Color(0.38, 0.41, 0.44), 0.16, 0.92)
-	var lamp_white = _emissive(Color(0.90, 0.96, 1.0), 5.0)
-	var lamp_red = _emissive(Color(1.0, 0.02, 0.01), 3.0)
+	var blender_loaded := false
+	if ResourceLoader.exists(BLENDER_CAR):
+		var packed = load(BLENDER_CAR)
+		if packed is PackedScene:
+			var model = packed.instantiate()
+			model.name = "BlenderSportSedan"
+			body_visual.add_child(model)
+			blender_loaded = true
 
-	_add_visual_box(Vector3(1.92, 0.42, 4.28), Vector3(0, 0.68, 0), paint)
-	_add_visual_box(Vector3(1.82, 0.22, 1.25), Vector3(0, 0.92, -1.25), paint)
-	_add_visual_box(Vector3(1.76, 0.18, 0.92), Vector3(0, 0.88, 1.53), paint)
-	_add_visual_box(Vector3(1.64, 0.58, 1.92), Vector3(0, 1.24, 0.18), glass)
-	_add_visual_box(Vector3(1.70, 0.11, 1.98), Vector3(0, 1.55, 0.18), paint)
-	_add_visual_box(Vector3(1.84, 0.15, 0.13), Vector3(0, 0.46, -2.15), dark)
-	_add_visual_box(Vector3(1.84, 0.15, 0.13), Vector3(0, 0.46, 2.15), dark)
+	if not blender_loaded:
+		_build_fallback_car()
 
-	for x in [-0.55, 0.55]:
-		_add_visual_box(Vector3(0.42, 0.16, 0.08), Vector3(x, 0.78, -2.17), lamp_white)
-		var rear = _add_visual_box(Vector3(0.38, 0.16, 0.08), Vector3(x, 0.76, 2.17), lamp_red)
+	# Overlay lights remain separate so gameplay can change them dynamically.
+	var lamp_red = _emissive(Color(1.0, 0.02, 0.01), 2.8)
+	for x in [-0.58, 0.58]:
+		var rear = _add_visual_box(Vector3(0.38, 0.15, 0.035), Vector3(x, 0.82, 2.31), lamp_red)
 		brake_lights.append(rear)
-
-	var grille = _add_visual_box(Vector3(1.2, 0.28, 0.045), Vector3(0, 0.60, -2.22), dark)
-	grille.rotation_degrees.x = 4.0
-	_add_visual_box(Vector3(0.52, 0.06, 0.055), Vector3(0, 0.46, -2.24), chrome)
-
-	for x in [-0.98, 0.98]:
-		for z in [-1.38, 1.38]:
-			var wheel_root = Node3D.new()
-			wheel_root.position = Vector3(x, 0.43, z)
-			body_visual.add_child(wheel_root)
-
-			var tire = MeshInstance3D.new()
-			var tire_mesh = CylinderMesh.new()
-			tire_mesh.top_radius = 0.39
-			tire_mesh.bottom_radius = 0.39
-			tire_mesh.height = 0.29
-			tire_mesh.radial_segments = 24
-			tire.mesh = tire_mesh
-			tire.rotation_degrees.z = 90
-			tire.material_override = rubber
-			wheel_root.add_child(tire)
-
-			var rim = MeshInstance3D.new()
-			var rim_mesh = CylinderMesh.new()
-			rim_mesh.top_radius = 0.235
-			rim_mesh.bottom_radius = 0.235
-			rim_mesh.height = 0.305
-			rim_mesh.radial_segments = 18
-			rim.mesh = rim_mesh
-			rim.rotation_degrees.z = 90
-			rim.material_override = chrome
-			wheel_root.add_child(rim)
-
-			wheels.append(wheel_root)
-			if z < 0.0:
-				front_wheels.append(wheel_root)
 
 	var collision = CollisionShape3D.new()
 	var shape = BoxShape3D.new()
@@ -114,22 +74,22 @@ func _build_visuals():
 
 	for x in [-0.58, 0.58]:
 		var lamp = SpotLight3D.new()
-		lamp.position = Vector3(x, 0.79, -2.18)
-		lamp.spot_range = 36.0
+		lamp.position = Vector3(x, 0.82, -2.22)
+		lamp.spot_range = 42.0
 		lamp.spot_angle = 31.0
-		lamp.light_energy = 5.8
+		lamp.light_energy = 6.2
 		lamp.shadow_enabled = false
 		lamp.visible = false
 		add_child(lamp)
 		headlights.append(lamp)
 
 	var camera_pivot = Node3D.new()
-	camera_pivot.position = Vector3(0, 1.55, 0.9)
+	camera_pivot.position = Vector3(0, 1.62, 0.88)
 	camera_pivot.rotation_degrees.x = -12.5
 	add_child(camera_pivot)
 
 	var spring = SpringArm3D.new()
-	spring.spring_length = 8.1
+	spring.spring_length = 8.25
 	spring.margin = 0.25
 	spring.collision_mask = 1
 	camera_pivot.add_child(spring)
@@ -139,6 +99,45 @@ func _build_visuals():
 	camera.current = true
 	spring.add_child(camera)
 
+func _build_fallback_car():
+	var paint = PBRLibrary.paint(Color(0.025, 0.20, 0.68), 0.84, 0.17)
+	var glass = PBRLibrary.glass()
+	var dark = _material(Color(0.018, 0.021, 0.026), 0.56, 0.15)
+	var rubber = _material(Color(0.015, 0.017, 0.018), 0.96, 0.0)
+	var chrome = _material(Color(0.38, 0.41, 0.44), 0.16, 0.92)
+
+	_add_visual_box(Vector3(1.92, 0.48, 4.28), Vector3(0, 0.69, 0), paint)
+	_add_visual_box(Vector3(1.62, 0.63, 1.95), Vector3(0, 1.25, 0.12), glass)
+	_add_visual_box(Vector3(1.72, 0.17, 1.95), Vector3(0, 1.58, 0.12), paint)
+	_add_visual_box(Vector3(1.84, 0.16, 0.14), Vector3(0, 0.46, -2.15), dark)
+	_add_visual_box(Vector3(1.84, 0.16, 0.14), Vector3(0, 0.46, 2.15), dark)
+
+	for x in [-0.98, 0.98]:
+		for z in [-1.38, 1.38]:
+			var tire = MeshInstance3D.new()
+			var tire_mesh = CylinderMesh.new()
+			tire_mesh.top_radius = 0.39
+			tire_mesh.bottom_radius = 0.39
+			tire_mesh.height = 0.29
+			tire_mesh.radial_segments = 24
+			tire.mesh = tire_mesh
+			tire.rotation_degrees.z = 90
+			tire.position = Vector3(x, 0.43, z)
+			tire.material_override = rubber
+			body_visual.add_child(tire)
+
+			var rim = MeshInstance3D.new()
+			var rim_mesh = CylinderMesh.new()
+			rim_mesh.top_radius = 0.235
+			rim_mesh.bottom_radius = 0.235
+			rim_mesh.height = 0.305
+			rim_mesh.radial_segments = 18
+			rim.mesh = rim_mesh
+			rim.rotation_degrees.z = 90
+			rim.position = Vector3(x, 0.43, z)
+			rim.material_override = chrome
+			body_visual.add_child(rim)
+
 func _setup_audio():
 	start_player = _audio3d("res://assets/audio/engine_start.wav", false, -2.0)
 	engine_low = _audio3d("res://assets/audio/engine_low.wav", true, -3.0)
@@ -147,16 +146,11 @@ func _setup_audio():
 	wind_player = _audio3d("res://assets/audio/wind.ogg", true, -36.0)
 	impact_player = _audio3d("res://assets/audio/impact.wav", false, -5.0)
 
+	for p in [engine_low, engine_high, road_player, wind_player]:
+		if p and p.stream:
+			p.play()
 	if start_player and start_player.stream:
 		start_player.play()
-	if engine_low and engine_low.stream:
-		engine_low.play()
-	if engine_high and engine_high.stream:
-		engine_high.play()
-	if road_player and road_player.stream:
-		road_player.play()
-	if wind_player and wind_player.stream:
-		wind_player.play()
 
 func _audio3d(path: String, looped: bool, volume: float) -> AudioStreamPlayer3D:
 	var p = AudioStreamPlayer3D.new()
@@ -176,10 +170,10 @@ func _audio3d(path: String, looped: bool, volume: float) -> AudioStreamPlayer3D:
 func _physics_process(delta):
 	crash_cooldown = max(0.0, crash_cooldown - delta)
 
-	var throttle = 0.0
-	var brake = 0.0
-	var steer = 0.0
-	var handbrake = false
+	var throttle := 0.0
+	var brake := 0.0
+	var steer := 0.0
+	var handbrake := false
 
 	if not controls_locked:
 		throttle = Input.get_action_strength("move_forward")
@@ -244,11 +238,6 @@ func _physics_process(delta):
 	if throttle > 0.01 and speed > 0.1:
 		var load = 0.0045 + speed_ratio * 0.0105
 		fuel = max(0.0, fuel - load * throttle * delta)
-
-	for wheel in wheels:
-		wheel.rotate_x(speed * delta * 1.25)
-	for wheel in front_wheels:
-		wheel.rotation.y = lerp(wheel.rotation.y, steer * 0.42, delta * 8.0)
 
 	if body_visual:
 		body_visual.rotation.z = lerp(body_visual.rotation.z, -steer * speed_ratio * 0.045, delta * 5.5)
