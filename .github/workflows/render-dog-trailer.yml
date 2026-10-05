@@ -50,9 +50,10 @@ jobs:
           set -euo pipefail
           BLENDER=".cache/blender/blender-5.2.2-linux-x64/blender"
           xvfb-run -a "$BLENDER" --background --factory-startup             --python blender-trailers/dog-buyer/trailer.py
-          test -s /tmp/dog_trailer.mp4
+          test -n "$(find /tmp/dog_frames -type f -name 'frame_*.png' -print -quit)"
           test -s /tmp/dog_trailer_scene.blend
-          ls -lh /tmp/dog_trailer.mp4 /tmp/dog_trailer_scene.blend
+          echo "Rendered frames: $(find /tmp/dog_frames -type f -name 'frame_*.png' | wc -l)"
+          ls -lh /tmp/dog_trailer_scene.blend
 
       - name: Create cinematic audio bed
         shell: bash
