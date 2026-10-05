@@ -1,7 +1,8 @@
 extends Node3D
 
 const PlayerCarScript = preload("res://scripts/player_car.gd")
-const TrafficCarScript = preload("res://scripts/traffic_car.gd")\nconst PBRLibrary = preload("res://scripts/pbr_library.gd")
+const TrafficCarScript = preload("res://scripts/traffic_car.gd")
+const PBRLibrary = preload("res://scripts/pbr_library.gd")
 
 var rng = RandomNumberGenerator.new()
 var player
@@ -27,6 +28,8 @@ var notify_label
 var notify_time := 0.0
 var garage_panel
 var garage_buttons := {}
+var graphics_button
+var graphics_quality := 2
 var touch_nodes := []
 var touch_visuals := []
 
