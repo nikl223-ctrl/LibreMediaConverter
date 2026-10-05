@@ -124,7 +124,10 @@ def export_asset(name):
     if meshes:
         bpy.context.view_layer.objects.active = meshes[0]
         bpy.ops.object.join()
-        meshes[0].name = name
+        joined = bpy.context.object
+        joined.name = name
+        bpy.context.scene.cursor.location = (0.0, 0.0, 0.0)
+        bpy.ops.object.origin_set(type="ORIGIN_CURSOR", center="MEDIAN")
 
     blend_path = SOURCES / f"{name}.blend"
     glb_path = MODELS / f"{name}.glb"
