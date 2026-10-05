@@ -12,6 +12,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Install probe tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg vainfo mesa-va-drivers pciutils
+
       - name: Probe CPU GPU and video encoders
         run: |
           set -uo pipefail
@@ -30,6 +35,12 @@ jobs:
           echo
           echo "=== DRM / GPU device nodes ==="
           ls -la /dev/dri 2>/dev/null || echo "No /dev/dri"
+          for d in /sys/class/drm/card*/device; do
+            [ -e "$d" ] || continue
+            echo "--- $d ---"
+            cat "$d/uevent" 2>/dev/null || true
+            readlink -f "$d/driver" 2>/dev/null || true
+          done
           ls -la /dev/nvidia* 2>/dev/null || echo "No /dev/nvidia devices"
           echo
           echo "=== NVIDIA ==="
@@ -48,6 +59,7 @@ jobs:
           ffmpeg -hide_banner -encoders 2>/dev/null | grep -Ei 'h264_(nvenc|vaapi|qsv|amf)|hevc_(nvenc|vaapi|qsv|amf)|videotoolbox' || echo "No hardware H264/HEVC encoder exposed"
           echo
           echo "=== CPU 4K H264 quick benchmark ==="
+          set +e
           /usr/bin/time -f 'BENCH_REAL=%e sec\nBENCH_CPU=%P\nBENCH_MAXRSS=%M KB' \
             ffmpeg -hide_banner -loglevel info -stats \
               -f lavfi -i testsrc2=size=1920x1080:rate=30 \
@@ -55,3 +67,4 @@ jobs:
               -vf "scale=3840:2160:flags=fast_bilinear" \
               -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
               -f null - 2>&1 | tail -25
+          true
