@@ -230,7 +230,7 @@ jobs:
           echo "video_bps=$video_bps" >> "$GITHUB_OUTPUT"
           echo "output_name=$output_name" >> "$GITHUB_OUTPUT"
 
-      - name: Convert 4K H264 ultrafast and stream to Drive
+      - name: Convert 4K H264 ultrafast locally and upload with retry
         id: convert
         env:
           INPUT_FILE: ${{ steps.input.outputs.input_file }}
@@ -244,18 +244,18 @@ jobs:
           set -euo pipefail
 
           dest_path="${DEST_FOLDER%/}/$OUTPUT_NAME"
-          rclone mkdir "drive:${DEST_FOLDER%/}"
+          local_output="$RUNNER_TEMP/encoded-output.mp4"
 
           bitrate="$VIDEO_BPS"
           maxrate=$(( bitrate * 12 / 10 ))
           bufsize=$(( bitrate * 2 ))
 
           echo "============================================================"
-          echo "LIVE H.264 ENCODE — updates roughly every 10 seconds"
+          echo "LIVE H.264 ENCODE — local file first, then resilient Drive upload"
           echo "============================================================"
 
           progress_fifo="$RUNNER_TEMP/ffmpeg-progress.fifo"
-          rm -f "$progress_fifo"
+          rm -f "$progress_fifo" "$local_output"
           mkfifo "$progress_fifo"
 
           stdbuf -oL awk -F= -v dur="$SOURCE_DURATION" '
@@ -290,7 +290,6 @@ jobs:
           progress_pid=$!
 
           set +e
-
           ffmpeg \
             -hide_banner \
             -loglevel warning \
@@ -312,40 +311,72 @@ jobs:
             -c:a aac \
             -ac "$AUDIO_CHANNELS" \
             -b:a "$AUDIO_BITRATE" \
-            -movflags +frag_keyframe+empty_moov+default_base_moof \
-            -f mp4 pipe:1 \
-            2> >(stdbuf -oL sed -u 's/^/[ffmpeg] /' >&2) \
-          | rclone rcat "drive:$dest_path" \
-              --drive-chunk-size 256M \
-              --tpslimit 8 \
-              --tpslimit-burst 8 \
-              --stats 10s \
-              --stats-one-line \
-              --stats-log-level NOTICE \
-              --log-level NOTICE \
-              --retries 10 \
-              --retries-sleep 10s \
-              --low-level-retries 50
-
-          pipe_status=( "${PIPESTATUS[@]}" )
+            -movflags +faststart \
+            "$local_output" \
+            2> >(stdbuf -oL sed -u 's/^/[ffmpeg] /' >&2)
+          ffmpeg_status=$?
           wait "$progress_pid" >/dev/null 2>&1 || true
           rm -f "$progress_fifo"
           set -e
 
-          ffmpeg_status="${pipe_status[0]:-1}"
-          rclone_status="${pipe_status[1]:-1}"
-
-          if [ "$ffmpeg_status" -ne 0 ] || [ "$rclone_status" -ne 0 ]; then
-            rclone deletefile "drive:$dest_path" >/dev/null 2>&1 || true
-            echo "::error::H264 conversion or Drive upload failed."
+          if [ "$ffmpeg_status" -ne 0 ] || [ ! -s "$local_output" ]; then
+            echo "::error::H264 encode failed before Drive upload."
             exit 1
           fi
 
-          final_size=$(rclone size --json "drive:$dest_path" | jq -r '.bytes // 0')
+          local_size=$(stat -c '%s' "$local_output")
+          if [ "$local_size" -le 0 ] || [ "$local_size" -gt "$OUTPUT_LIMIT_BYTES" ]; then
+            limit_gb=$(python3 -c 'import sys; print(round(int(sys.argv[1])/1000000000,3))' "$OUTPUT_LIMIT_BYTES")
+            echo "::error::Local output invalid or above configured limit of $limit_gb GB."
+            exit 1
+          fi
+
+          echo "Encode complete: $local_size bytes"
+          echo "Waiting a short per-run jitter before Drive upload to avoid 20 workers finalizing together..."
+          jitter=$(( GITHUB_RUN_ID % 240 ))
+          echo "Upload jitter: ${jitter}s"
+          sleep "$jitter"
+
+          rclone mkdir "drive:${DEST_FOLDER%/}" \
+            --tpslimit 2 --tpslimit-burst 2 \
+            --retries 20 --retries-sleep 30s --low-level-retries 100
+
+          upload_ok=0
+          for attempt in 1 2 3 4 5 6; do
+            echo "Drive upload attempt $attempt/6"
+            if rclone copyto "$local_output" "drive:$dest_path" \
+                --drive-chunk-size 128M \
+                --tpslimit 2 \
+                --tpslimit-burst 2 \
+                --stats 10s \
+                --stats-one-line \
+                --stats-log-level NOTICE \
+                --log-level NOTICE \
+                --retries 20 \
+                --retries-sleep 30s \
+                --low-level-retries 100; then
+              upload_ok=1
+              break
+            fi
+
+            backoff=$(( attempt * 90 ))
+            echo "Drive upload hit an error/rate limit; keeping local encode and retrying in ${backoff}s."
+            sleep "$backoff"
+          done
+
+          if [ "$upload_ok" -ne 1 ]; then
+            echo "::error::Drive upload failed after repeated retries. Local encode was successful."
+            exit 1
+          fi
+
+          final_size=$(rclone size --json "drive:$dest_path" \
+            --tpslimit 2 --tpslimit-burst 2 \
+            --retries 20 --retries-sleep 30s --low-level-retries 100 \
+            | jq -r '.bytes // 0')
 
           if [ "$final_size" -le 0 ] || [ "$final_size" -gt "$OUTPUT_LIMIT_BYTES" ]; then
             limit_gb=$(python3 -c 'import sys; print(round(int(sys.argv[1])/1000000000,3))' "$OUTPUT_LIMIT_BYTES")
-            echo "::error::Final file size invalid or above configured limit of $limit_gb GB."
+            echo "::error::Final Drive file invalid or above configured limit of $limit_gb GB."
             exit 1
           fi
 
