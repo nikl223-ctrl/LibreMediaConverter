@@ -4,7 +4,7 @@ config_version=5
 [application]
 config/name="RoadLife Simulator"
 run/main_scene="res://scenes/Main.tscn"
-config/features=PackedStringArray("4.7", "GL Compatibility")
+config/features=PackedStringArray("4.7", "Mobile")
 config/icon="res://icon.svg"
 
 [display]
@@ -17,8 +17,11 @@ window/handheld/orientation=0
 
 [rendering]
 textures/vram_compression/import_etc2_astc=true
-renderer/rendering_method="gl_compatibility"
-renderer/rendering_method.mobile="gl_compatibility"
+renderer/rendering_method="mobile"
+renderer/rendering_method.mobile="mobile"
+rendering_device/driver.android="vulkan"
+anti_aliasing/quality/msaa_3d=2
+anti_aliasing/quality/use_debanding=true
 environment/defaults/default_clear_color=Color(0.16, 0.22, 0.28, 1)
 
 [audio]
