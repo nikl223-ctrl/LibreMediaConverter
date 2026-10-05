@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-android:
@@ -95,9 +95,20 @@ jobs:
             exit 1
           fi
           cp "$APK" dist/RoadLifeSimulator-debug.apk
-          ls -lh dist/RoadLifeSimulator-debug.apk
+          cp "$APK" dist/RoadLifeSimulator-HD-S24Ultra.apk
+          ls -lh dist/RoadLifeSimulator-debug.apk dist/RoadLifeSimulator-HD-S24Ultra.apk
         env:
           BUILD_DIR: ${{ steps.export.outputs.build_directory }}
+
+      - name: Publish rolling HD APK release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: roadlife-hd-latest
+          name: RoadLife Simulator HD - Latest
+          prerelease: true
+          make_latest: false
+          files: dist/RoadLifeSimulator-HD-S24Ultra.apk
+          fail_on_unmatched_files: true
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
