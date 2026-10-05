@@ -22,6 +22,7 @@ for datablocks in (bpy.data.meshes, bpy.data.curves, bpy.data.materials,
 scene = bpy.context.scene
 scene.frame_start = 1
 scene.frame_end = END
+scene.frame_step = 2
 scene.render.fps = FPS
 scene.render.engine = 'BLENDER_EEVEE'
 scene.render.resolution_x = 1280
