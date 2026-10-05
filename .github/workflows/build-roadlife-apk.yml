@@ -104,6 +104,14 @@ jobs:
           zip -9 -j dist/RoadLifeSimulator-BlenderSources.zip simulator-game/blender/generated/*.blend
           ls -lh dist/RoadLifeSimulator-BlenderSources.zip
 
+      - name: Keep Blender sources out of Godot import
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf simulator-game/blender/generated
+          find simulator-game -type f -name '*.blend' -print
+          echo "Godot will import the optimized GLB files only."
+
       - name: Export with Godot 4.7.2
         id: export
         uses: firebelley/godot-export@v8.0.0
