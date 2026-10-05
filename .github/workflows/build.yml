@@ -11,6 +11,8 @@ on:
       - "conversion-requests-h264/**"
       - "conversion-requests/**"
       - "cancel-h264-run.txt"
+      - "cpu-probe.txt"
+      - ".github/workflows/cpu-probe.yml"
 
 # Actions are pinned to a commit rather than a tag, with the release in a trailing
 # comment. A tag is mutable -- the owner can repoint it at new code -- so a tag
