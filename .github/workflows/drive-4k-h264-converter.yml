@@ -96,6 +96,20 @@ jobs:
 
           rclone about drive: >/dev/null
 
+      - name: Preflight Drive upload
+        run: |
+          set -euo pipefail
+          rclone mkdir "drive:${DEST_FOLDER%/}"
+          probe_path="${DEST_FOLDER%/}/.upload-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.txt"
+          if ! printf 'LibreMediaConverter Drive upload probe\n' | rclone rcat "drive:$probe_path" \
+            --drive-chunk-size 8M \
+            --retries 2 --low-level-retries 3 --retries-sleep 5s; then
+            echo "::error::Google Drive currently rejects uploads. Conversion was not started, so runner time and disk space were not wasted."
+            exit 1
+          fi
+          rclone deletefile "drive:$probe_path" >/dev/null 2>&1 || true
+          echo "Drive upload preflight passed."
+
       - name: Read request and download source
         id: input
         run: |
