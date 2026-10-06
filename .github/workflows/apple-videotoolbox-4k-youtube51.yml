@@ -1,0 +1,398 @@
+name: Apple VideoToolbox 4K H264 YouTube 5.1
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "conversion-requests-vt51/*.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  convert:
+    runs-on: macos-15
+    timeout-minutes: 350
+
+    env:
+      RCLONE_CONFIG: /tmp/rclone.conf
+      DEST_FOLDER: "Video Converter/Fertig"
+      MAX_OUTPUT_BYTES: "30000000000"
+      TARGET_BYTES: "28000000000"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Show runner CPU
+        run: |
+          echo "=== Runner CPU ==="
+          lscpu | grep -E 'Model name|CPU\(s\)|Thread|Core|Socket|CPU max MHz' || true
+
+      - name: Install tools
+        run: |
+          set -euo pipefail
+          brew install ffmpeg rclone jq
+          ffmpeg -hide_banner -encoders | grep h264_videotoolbox
+
+      - name: Configure Google Drive
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          for var in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET GOOGLE_REFRESH_TOKEN; do
+            if [ -z "${!var:-}" ]; then
+              echo "::error::Missing GitHub secret: $var"
+              exit 1
+            fi
+          done
+
+          # 202264815644 is rclone's public shared OAuth client project.
+          # Using it means sharing Google's API quota with every other rclone user.
+          client_project="${GOOGLE_CLIENT_ID%%-*}"
+          if [ "$client_project" != "160241343420" ]; then
+            echo "::error::Wrong Google OAuth project. This workflow only accepts the private repository OAuth client for project 160241343420; the public rclone client 202264815644 is forbidden."
+            exit 1
+          fi
+
+          token_response=$(curl -fsS --request POST \
+            --data-urlencode "client_id=$GOOGLE_CLIENT_ID" \
+            --data-urlencode "client_secret=$GOOGLE_CLIENT_SECRET" \
+            --data-urlencode "refresh_token=$GOOGLE_REFRESH_TOKEN" \
+            --data-urlencode "grant_type=refresh_token" \
+            https://oauth2.googleapis.com/token)
+
+          access_token=$(printf '%s' "$token_response" | jq -r '.access_token // empty')
+          expires_in=$(printf '%s' "$token_response" | jq -r '.expires_in // 3600')
+
+          if [ -z "$access_token" ]; then
+            echo "::error::Google OAuth refresh failed."
+            exit 1
+          fi
+
+          echo "::add-mask::$access_token"
+          expiry=$(date -u -d "+${expires_in} seconds" '+%Y-%m-%dT%H:%M:%SZ')
+          token_json=$(jq -cn \
+            --arg at "$access_token" \
+            --arg rt "$GOOGLE_REFRESH_TOKEN" \
+            --arg ex "$expiry" \
+            '{access_token:$at,token_type:"Bearer",refresh_token:$rt,expiry:$ex}')
+
+          rclone config create drive drive \
+            client_id "$GOOGLE_CLIENT_ID" \
+            client_secret "$GOOGLE_CLIENT_SECRET" \
+            scope drive \
+            token "$token_json" \
+            --non-interactive >/dev/null
+
+          rclone about drive: >/dev/null
+
+      - name: Preflight Drive upload
+        run: |
+          set -euo pipefail
+          rclone mkdir "drive:${DEST_FOLDER%/}"
+          probe_path="${DEST_FOLDER%/}/.upload-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.txt"
+          if ! printf 'LibreMediaConverter Drive upload probe\n' | rclone rcat "drive:$probe_path" \
+            --drive-chunk-size 8M \
+            --retries 2 --low-level-retries 3 --retries-sleep 5s; then
+            echo "::error::Google Drive currently rejects uploads. Conversion was not started, so runner time and disk space were not wasted."
+            exit 1
+          fi
+          rclone deletefile "drive:$probe_path" >/dev/null 2>&1 || true
+          echo "Drive upload preflight passed."
+
+      - name: Read request and download source
+        id: input
+        run: |
+          set -euo pipefail
+
+          request_file=$(find conversion-requests-vt51 -maxdepth 1 -type f -name '*.txt' -printf '%T@ %p\\n' | sort -nr | head -n 1 | cut -d' ' -f2- || true)
+
+          if [ -z "$request_file" ] || [ ! -f "$request_file" ]; then
+            echo "::error::No H264 conversion request found."
+            exit 1
+          fi
+
+          raw=$(sed -n '1p' "$request_file" | tr -d '\r\n\t ')
+
+          # Optional per-request settings. Existing request files continue to use
+          # the normal ~28 GB target, stereo AAC 192k and 30 GB limit.
+          video_mbit=$(sed -n 's/^VIDEO_BITRATE_MBIT=//p' "$request_file" | tail -n 1 | tr -d '\r\n\t ' || true)
+          audio_channels=$(sed -n 's/^AUDIO_CHANNELS=//p' "$request_file" | tail -n 1 | tr -d '\r\n\t ' || true)
+          audio_bitrate=$(sed -n 's/^AUDIO_BITRATE=//p' "$request_file" | tail -n 1 | tr -d '\r\n\t ' || true)
+          request_max_output_bytes=$(sed -n 's/^MAX_OUTPUT_BYTES=//p' "$request_file" | tail -n 1 | tr -d '\r\n\t ' || true)
+          spatial_4x=$(sed -n 's/^SPATIAL_4X=//p' "$request_file" | tail -n 1 | tr -d '\r\n\t ' || true)
+          [ -n "$spatial_4x" ] || spatial_4x=0
+
+          [ -n "$audio_channels" ] || audio_channels=2
+          [ -n "$audio_bitrate" ] || audio_bitrate=192k
+          [ -n "$request_max_output_bytes" ] || request_max_output_bytes="$MAX_OUTPUT_BYTES"
+
+          if [ -n "$video_mbit" ] && ! [[ "$video_mbit" =~ ^[0-9]+$ ]]; then
+            echo "::error::VIDEO_BITRATE_MBIT must be an integer."
+            exit 1
+          fi
+          if ! [[ "$audio_channels" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::AUDIO_CHANNELS must be a positive integer."
+            exit 1
+          fi
+          if ! [[ "$request_max_output_bytes" =~ ^[0-9]+$ ]]; then
+            echo "::error::MAX_OUTPUT_BYTES must be an integer."
+            exit 1
+          fi
+
+          if [[ "$raw" =~ /d/([^/?]+) ]]; then
+            file_id="${BASH_REMATCH[1]}"
+          elif [[ "$raw" =~ [\?\&]id=([^\&]+) ]]; then
+            file_id="${BASH_REMATCH[1]}"
+          else
+            file_id="$raw"
+          fi
+
+          input_dir="$RUNNER_TEMP/video-input"
+          mkdir -p "$input_dir"
+
+          echo "Downloading source from Google Drive..."
+          start_epoch=$(date +%s)
+
+          rclone backend copyid drive: "$file_id" "$input_dir/" \
+            --stats 10s \
+            --stats-one-line \
+            --retries 5 \
+            --low-level-retries 10
+
+          end_epoch=$(date +%s)
+          elapsed=$(( end_epoch - start_epoch ))
+          [ "$elapsed" -gt 0 ] || elapsed=1
+
+          input_file=$(find "$input_dir" -maxdepth 1 -type f -printf '%T@ %p\n' \
+            | sort -nr | head -n 1 | cut -d' ' -f2-)
+
+          if [ -z "$input_file" ] || [ ! -s "$input_file" ]; then
+            echo "::error::Source file was not downloaded."
+            exit 1
+          fi
+
+          source_size=$(stat -c '%s' "$input_file")
+          avg_mbps=$(python3 -c 'import sys; b=int(sys.argv[1]); s=max(1,int(sys.argv[2])); print(round((b*8/s)/1000000,2))' "$source_size" "$elapsed")
+
+          echo "Downloaded: $(basename "$input_file")"
+          echo "Average download speed: $avg_mbps Mbit/s"
+
+          echo "input_file=$input_file" >> "$GITHUB_OUTPUT"
+          echo "download_mbps=$avg_mbps" >> "$GITHUB_OUTPUT"
+          echo "video_mbit=$video_mbit" >> "$GITHUB_OUTPUT"
+          echo "audio_channels=$audio_channels" >> "$GITHUB_OUTPUT"
+          echo "audio_bitrate=$audio_bitrate" >> "$GITHUB_OUTPUT"
+          echo "max_output_bytes=$request_max_output_bytes" >> "$GITHUB_OUTPUT"
+          echo "spatial_4x=$spatial_4x" >> "$GITHUB_OUTPUT"
+
+      - name: Probe source and calculate bitrate
+        id: probe
+        env:
+          INPUT_FILE: ${{ steps.input.outputs.input_file }}
+          CUSTOM_VIDEO_MBIT: ${{ steps.input.outputs.video_mbit }}
+        run: |
+          set -euo pipefail
+
+          duration=$(ffprobe -v error \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 \
+            "$INPUT_FILE" | head -n 1)
+
+          python3 -c 'import math,sys; d=float(sys.argv[1]); assert d>0 and math.isfinite(d)' "$duration"
+
+          if [ -n "${CUSTOM_VIDEO_MBIT:-}" ]; then
+            video_bps=$(( CUSTOM_VIDEO_MBIT * 1000000 ))
+          else
+            video_bps=$(python3 -c \
+              'import sys; d=float(sys.argv[1]); t=int(sys.argv[2]); a=192000; print(max(500000,min(int((t*8/d)*0.985-a),100000000)))' \
+              "$duration" "$TARGET_BYTES")
+          fi
+
+          base=$(basename "$INPUT_FILE")
+          stem="${base%.*}"
+          ext="${base##*.}"
+
+          if [ "$base" = "$stem" ]; then
+            output_name="${base}.mp4"
+          elif [ "${ext,,}" = "mp4" ]; then
+            output_name="$base"
+          else
+            output_name="${stem}.mp4"
+          fi
+
+          output_name=$(printf '%s' "$output_name" | tr '/\\\r\n\t' '____')
+
+          duration_hms=$(python3 -c 'import sys; s=float(sys.argv[1]); h=int(s//3600); m=int((s%3600)//60); sec=int(s%60); print(f"{h:02d}:{m:02d}:{sec:02d}")' "$duration")
+
+          echo "Source duration: $duration_hms"
+          echo "Target bitrate: $(( video_bps / 1000000 )) Mbit/s"
+          echo "Output: $output_name"
+
+          echo "duration=$duration" >> "$GITHUB_OUTPUT"
+          echo "video_bps=$video_bps" >> "$GITHUB_OUTPUT"
+          echo "output_name=$output_name" >> "$GITHUB_OUTPUT"
+
+      - name: Convert 4K H264 ultrafast and stream to Drive
+        id: convert
+        env:
+          INPUT_FILE: ${{ steps.input.outputs.input_file }}
+          OUTPUT_NAME: ${{ steps.probe.outputs.output_name }}
+          VIDEO_BPS: ${{ steps.probe.outputs.video_bps }}
+          SOURCE_DURATION: ${{ steps.probe.outputs.duration }}
+          AUDIO_CHANNELS: ${{ steps.input.outputs.audio_channels }}
+          AUDIO_BITRATE: ${{ steps.input.outputs.audio_bitrate }}
+          OUTPUT_LIMIT_BYTES: ${{ steps.input.outputs.max_output_bytes }}
+          SPATIAL_4X: ${{ steps.input.outputs.spatial_4x }}
+        run: |
+          set -euo pipefail
+
+          dest_path="${DEST_FOLDER%/}/$OUTPUT_NAME"
+          rclone mkdir "drive:${DEST_FOLDER%/}" --tpslimit 2 --tpslimit-burst 1 --retries 20 --retries-sleep 30s --low-level-retries 100
+
+          bitrate="$VIDEO_BPS"
+          maxrate=$(( bitrate * 12 / 10 ))
+          bufsize=$(( bitrate * 2 ))
+
+          if [ "${SPATIAL_4X:-0}" = "1" ]; then
+            # 4x spatial supersampling only; source FPS is preserved.
+            # Render each axis at 4x first, then downsample to UHD to reduce jagged/dirty edges.
+            video_filter="scale=iw*4:ih*4:flags=lanczos,scale=3840:2160:force_original_aspect_ratio=decrease:flags=lanczos,pad=3840:2160:(ow-iw)/2:(oh-ih)/2,setsar=1"
+            echo "Spatial 4x supersampling enabled (FPS unchanged)."
+          else
+            video_filter="scale=3840:2160:force_original_aspect_ratio=decrease,pad=3840:2160:(ow-iw)/2:(oh-ih)/2,setsar=1"
+          fi
+
+          echo "============================================================"
+          echo "LIVE H.264 ENCODE — updates roughly every 10 seconds"
+          echo "============================================================"
+
+          progress_fifo="$RUNNER_TEMP/ffmpeg-progress.fifo"
+          rm -f "$progress_fifo"
+          mkfifo "$progress_fifo"
+
+          stdbuf -oL awk -F= -v dur="$SOURCE_DURATION" '
+            function fmt(sec, h,m,s) {
+              if (sec < 0) sec=0
+              h=int(sec/3600)
+              m=int((sec%3600)/60)
+              s=int(sec%60)
+              return sprintf("%02d:%02d:%02d",h,m,s)
+            }
+            $1=="frame" { frame=$2; next }
+            $1=="fps" { fps=$2; next }
+            $1=="out_time" {
+              out=$2
+              n=split(out,a,":")
+              if (n==3) pos=(a[1]*3600)+(a[2]*60)+a[3]
+              next
+            }
+            $1=="speed" { speed=$2; next }
+            $1=="progress" {
+              sf=speed
+              gsub(/x/,"",sf)
+              sf+=0
+              pct=(dur>0 ? (pos/dur)*100 : 0)
+              if (pct>100) pct=100
+              eta=(sf>0 && dur>pos ? (dur-pos)/sf : 0)
+              printf("LIVE | %5.1f%% | FPS=%s | SPEED=%s | VIDEO=%s | ETA=%s\n", pct, fps, speed, out, fmt(eta))
+              fflush()
+              next
+            }
+          ' < "$progress_fifo" &
+          progress_pid=$!
+
+          set +e
+
+          ffmpeg \
+            -hide_banner \
+            -loglevel warning \
+            -nostats \
+            -stats_period 10 \
+            -progress "$progress_fifo" \
+            -i "$INPUT_FILE" \
+            -map 0:v:0 -map '0:a?' \
+            -fps_mode passthrough \
+            -vf "$video_filter" \
+            -c:v h264_videotoolbox \
+            -profile:v high \
+            -level:v 5.1 \
+            -pix_fmt yuv420p \
+            -b:v "$bitrate" \
+            -maxrate "$maxrate" \
+            -bufsize "$bufsize" \
+            -c:a aac \
+            -ar 48000 \
+            -ac 6 \
+            -channel_layout 5.1 \
+            -b:a 512k \
+            -af "loudnorm=I=-18:LRA=11:TP=-1.5" \
+            -movflags +frag_keyframe+empty_moov+default_base_moof \
+            -f mp4 pipe:1 \
+            2> >(stdbuf -oL sed -u 's/^/[ffmpeg] /' >&2) \
+          | rclone rcat "drive:$dest_path" \
+              --drive-chunk-size 256M \
+              --drive-pacer-min-sleep 250ms \
+              --tpslimit 2 \
+              --tpslimit-burst 1 \
+              --stats 10s \
+              --stats-one-line \
+              --stats-log-level NOTICE \
+              --log-level NOTICE \
+              --retries 30 \
+              --retries-sleep 30s \
+              --low-level-retries 200
+
+          pipe_status=( "${PIPESTATUS[@]}" )
+          wait "$progress_pid" >/dev/null 2>&1 || true
+          rm -f "$progress_fifo"
+          set -e
+
+          ffmpeg_status="${pipe_status[0]:-1}"
+          rclone_status="${pipe_status[1]:-1}"
+
+          if [ "$ffmpeg_status" -ne 0 ] || [ "$rclone_status" -ne 0 ]; then
+            rclone deletefile "drive:$dest_path" >/dev/null 2>&1 || true
+            echo "::error::H264 conversion or Drive upload failed."
+            exit 1
+          fi
+
+          sleep $(( GITHUB_RUN_ID % 120 ))
+          final_size=$(rclone size --json "drive:$dest_path" --tpslimit 1 --tpslimit-burst 1 --retries 20 --retries-sleep 30s --low-level-retries 100 | jq -r '.bytes // 0')
+
+          if [ "$final_size" -le 0 ] || [ "$final_size" -gt "$OUTPUT_LIMIT_BYTES" ]; then
+            limit_gb=$(python3 -c 'import sys; print(round(int(sys.argv[1])/1000000000,3))' "$OUTPUT_LIMIT_BYTES")
+            echo "::error::Final file size invalid or above configured limit of $limit_gb GB."
+            exit 1
+          fi
+
+          echo "dest_path=$dest_path" >> "$GITHUB_OUTPUT"
+          echo "final_size=$final_size" >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        env:
+          DEST_PATH: ${{ steps.convert.outputs.dest_path }}
+          FINAL_SIZE: ${{ steps.convert.outputs.final_size }}
+          DOWNLOAD_MBPS: ${{ steps.input.outputs.download_mbps }}
+          AUDIO_CHANNELS: ${{ steps.input.outputs.audio_channels }}
+          AUDIO_BITRATE: ${{ steps.input.outputs.audio_bitrate }}
+          VIDEO_BPS: ${{ steps.probe.outputs.video_bps }}
+        run: |
+          size_gb=$(python3 -c 'import sys; print(round(int(sys.argv[1])/1000000000,3))' "$FINAL_SIZE")
+
+          {
+            echo "## 4K H.264 conversion complete"
+            echo "- Output: \`$DEST_PATH\`"
+            echo "- Size: $size_gb GB"
+            echo "- Video: 3840x2160 H.264 @ $(( VIDEO_BPS / 1000000 )) Mbit/s"
+            echo "- Preset: ultrafast"
+            echo "- Audio: AAC $AUDIO_BITRATE, $AUDIO_CHANNELS channels"
+            echo "- Average source download: $DOWNLOAD_MBPS Mbit/s"
+          } >> "$GITHUB_STEP_SUMMARY"
