@@ -1,0 +1,16 @@
+name: GPU Runner Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  gpu-test:
+    runs-on: gpu-t4-4-core
+    timeout-minutes: 10
+    steps:
+      - name: Show GPU
+        run: |
+          echo "=== NVIDIA GPU ==="
+          nvidia-smi
+          echo "=== FFmpeg hardware acceleration ==="
+          ffmpeg -hwaccels || true
