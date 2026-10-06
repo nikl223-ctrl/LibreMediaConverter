@@ -1,0 +1,28 @@
+name: CPU Runner Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/cpu-runner-probe.yml"
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - name: Inspect CPU and runner
+        run: |
+          echo "=== CPU ==="
+          lscpu
+          echo "=== /proc/cpuinfo model ==="
+          grep -m1 'model name' /proc/cpuinfo || true
+          echo "=== cores available ==="
+          nproc
+          echo "=== memory ==="
+          free -h
+          echo "=== runner image ==="
+          echo "$ImageOS $ImageVersion"
+          echo "=== disk ==="
+          df -h /
