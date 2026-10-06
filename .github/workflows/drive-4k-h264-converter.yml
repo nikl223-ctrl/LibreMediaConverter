@@ -132,6 +132,8 @@ jobs:
           audio_channels=$(sed -n 's/^AUDIO_CHANNELS=//p' "$request_file" | tail -n 1 | tr -d '\r\n\t ' || true)
           audio_bitrate=$(sed -n 's/^AUDIO_BITRATE=//p' "$request_file" | tail -n 1 | tr -d '\r\n\t ' || true)
           request_max_output_bytes=$(sed -n 's/^MAX_OUTPUT_BYTES=//p' "$request_file" | tail -n 1 | tr -d '\r\n\t ' || true)
+          spatial_4x=$(sed -n 's/^SPATIAL_4X=//p' "$request_file" | tail -n 1 | tr -d '\r\n\t ' || true)
+          [ -n "$spatial_4x" ] || spatial_4x=0
 
           [ -n "$audio_channels" ] || audio_channels=2
           [ -n "$audio_bitrate" ] || audio_bitrate=192k
@@ -194,6 +196,7 @@ jobs:
           echo "audio_channels=$audio_channels" >> "$GITHUB_OUTPUT"
           echo "audio_bitrate=$audio_bitrate" >> "$GITHUB_OUTPUT"
           echo "max_output_bytes=$request_max_output_bytes" >> "$GITHUB_OUTPUT"
+          echo "spatial_4x=$spatial_4x" >> "$GITHUB_OUTPUT"
 
       - name: Probe source and calculate bitrate
         id: probe
@@ -252,6 +255,7 @@ jobs:
           AUDIO_CHANNELS: ${{ steps.input.outputs.audio_channels }}
           AUDIO_BITRATE: ${{ steps.input.outputs.audio_bitrate }}
           OUTPUT_LIMIT_BYTES: ${{ steps.input.outputs.max_output_bytes }}
+          SPATIAL_4X: ${{ steps.input.outputs.spatial_4x }}
         run: |
           set -euo pipefail
 
@@ -261,6 +265,15 @@ jobs:
           bitrate="$VIDEO_BPS"
           maxrate=$(( bitrate * 12 / 10 ))
           bufsize=$(( bitrate * 2 ))
+
+          if [ "${SPATIAL_4X:-0}" = "1" ]; then
+            # 4x spatial supersampling only; source FPS is preserved.
+            # Render each axis at 4x first, then downsample to UHD to reduce jagged/dirty edges.
+            video_filter="scale=iw*4:ih*4:flags=lanczos,scale=3840:2160:force_original_aspect_ratio=decrease:flags=lanczos,pad=3840:2160:(ow-iw)/2:(oh-ih)/2,setsar=1"
+            echo "Spatial 4x supersampling enabled (FPS unchanged)."
+          else
+            video_filter="scale=3840:2160:force_original_aspect_ratio=decrease,pad=3840:2160:(ow-iw)/2:(oh-ih)/2,setsar=1"
+          fi
 
           echo "============================================================"
           echo "LIVE H.264 ENCODE — updates roughly every 10 seconds"
@@ -312,7 +325,7 @@ jobs:
             -i "$INPUT_FILE" \
             -map 0:v:0 -map '0:a?' \
             -fps_mode passthrough \
-            -vf "scale=3840:2160:force_original_aspect_ratio=decrease,pad=3840:2160:(ow-iw)/2:(oh-ih)/2,setsar=1" \
+            -vf "$video_filter" \
             -c:v libx264 \
             -preset ultrafast \
             -profile:v high \
