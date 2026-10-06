@@ -40,8 +40,8 @@ jobs:
           # The speed test must use the same private OAuth project as the
           # conversion workflows, never rclone's public shared client.
           client_project="${GOOGLE_CLIENT_ID%%-*}"
-          if [ "$client_project" = "202264815644" ]; then
-            echo "::error::The public shared rclone OAuth client is not allowed. Configure the private GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REFRESH_TOKEN repository secrets."
+          if [ "$client_project" != "160241343420" ]; then
+            echo "::error::Wrong Google OAuth project. This workflow only accepts the private repository OAuth client for project 160241343420; the public rclone client 202264815644 is forbidden."
             exit 1
           fi
 
