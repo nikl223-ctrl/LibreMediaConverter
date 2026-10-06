@@ -1,0 +1,33 @@
+name: Apple VideoToolbox HDR H264 Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/apple-videotoolbox-hdr-probe.yml"
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - name: System and VideoToolbox probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "=== macOS hardware ==="
+          system_profiler SPHardwareDataType || true
+          echo "=== FFmpeg ==="
+          ffmpeg -version | head -n 5
+          echo "=== VideoToolbox H264 encoder ==="
+          ffmpeg -hide_banner -h encoder=h264_videotoolbox
+          echo "=== HDR-related filters ==="
+          ffmpeg -hide_banner -filters | grep -E 'zscale|tonemap|colorspace|loudnorm' || true
+          echo "=== 10-second encode capability test ==="
+          ffmpeg -hide_banner -y -f lavfi -i "testsrc2=size=1920x1080:rate=30:duration=10" \
+            -vf "scale=3840:2160,format=yuv420p" \
+            -c:v h264_videotoolbox -b:v 20M -color_primaries bt2020 -color_trc smpte2084 -colorspace bt2020nc \
+            -an "$RUNNER_TEMP/vt-hdr-probe.mp4"
+          ffprobe -v error -show_entries stream=codec_name,pix_fmt,color_space,color_transfer,color_primaries \
+            -of default=noprint_wrappers=1 "$RUNNER_TEMP/vt-hdr-probe.mp4"
