@@ -29,14 +29,11 @@ jobs:
           done
 
           client_prefix="${GOOGLE_CLIENT_ID%%-*}"
-          echo "OAuth client numeric prefix: $client_prefix"
-          echo "Project number reported by Drive error: 202264815644"
-
-          if [ "$client_prefix" = "202264815644" ]; then
-            echo "MATCH: GitHub is using an OAuth client from the same project that Drive rate-limited."
-          else
-            echo "MISMATCH: GitHub OAuth client prefix does NOT match the project number in the Drive error."
+          if [ "$client_prefix" != "160241343420" ]; then
+            echo "::error::Wrong Google OAuth project. Expected private project 160241343420. Public rclone project 202264815644 is forbidden."
+            exit 1
           fi
+          echo "Private Google OAuth project check passed."
 
           token_response=$(curl -fsS --request POST             --data-urlencode "client_id=$GOOGLE_CLIENT_ID"             --data-urlencode "client_secret=$GOOGLE_CLIENT_SECRET"             --data-urlencode "refresh_token=$GOOGLE_REFRESH_TOKEN"             --data-urlencode "grant_type=refresh_token"             https://oauth2.googleapis.com/token)
 
