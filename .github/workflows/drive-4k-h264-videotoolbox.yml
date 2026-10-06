@@ -60,8 +60,8 @@ jobs:
           done
 
           client_project="${GOOGLE_CLIENT_ID%%-*}"
-          if [ "$client_project" = "202264815644" ]; then
-            echo "::error::Shared rclone OAuth client is not allowed."
+          if [ "$client_project" != "160241343420" ]; then
+            echo "::error::Wrong Google OAuth project. This workflow only accepts the private repository OAuth client for project 160241343420; the public rclone client 202264815644 is forbidden."
             exit 1
           fi
 
