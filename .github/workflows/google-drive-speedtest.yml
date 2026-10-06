@@ -37,6 +37,14 @@ jobs:
             fi
           done
 
+          # The speed test must use the same private OAuth project as the
+          # conversion workflows, never rclone's public shared client.
+          client_project="${GOOGLE_CLIENT_ID%%-*}"
+          if [ "$client_project" = "202264815644" ]; then
+            echo "::error::The public shared rclone OAuth client is not allowed. Configure the private GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REFRESH_TOKEN repository secrets."
+            exit 1
+          fi
+
           token_response=$(curl -fsS --request POST             --data-urlencode "client_id=$GOOGLE_CLIENT_ID"             --data-urlencode "client_secret=$GOOGLE_CLIENT_SECRET"             --data-urlencode "refresh_token=$GOOGLE_REFRESH_TOKEN"             --data-urlencode "grant_type=refresh_token"             https://oauth2.googleapis.com/token)
 
           access_token=$(printf '%s' "$token_response" | jq -r '.access_token // empty')
