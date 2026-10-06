@@ -1,0 +1,42 @@
+name: x64 vs ARM64 FFmpeg Benchmark
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/x64-arm64-ffmpeg-benchmark.yml"
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: x64
+            os: ubuntu-26.04
+          - name: arm64
+            os: ubuntu-26.04-arm
+    name: ${{ matrix.name }} FFmpeg benchmark
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - name: CPU and system information
+        run: |
+          echo "ARCH=$(uname -m)"
+          echo "NPROC=$(nproc)"
+          lscpu
+          free -h
+          ffmpeg -version | head -n 5
+
+      - name: Five-minute 4K H264 ultrafast benchmark
+        shell: bash
+        run: |
+          set -o pipefail
+          START=$(date +%s)
+          ffmpeg -hide_banner -stats -f lavfi -i "testsrc2=size=1920x1080:rate=30:duration=300" \
+            -vf "scale=iw*4:ih*4:flags=lanczos,scale=3840:2160:flags=lanczos" \
+            -c:v libx264 -preset ultrafast -pix_fmt yuv420p -an -f null - 2>&1 | tee benchmark.log
+          END=$(date +%s)
+          echo "WALL_SECONDS=$((END-START))"
+          tail -n 25 benchmark.log
