@@ -59,12 +59,10 @@ jobs:
           # 202264815644 is rclone's public shared OAuth client project.
           # Using it means sharing Google's API quota with every other rclone user.
           client_project="${GOOGLE_CLIENT_ID%%-*}"
-          if [ "$client_project" = "202264815644" ]; then
-            echo "::error::GOOGLE_CLIENT_ID is rclone's shared OAuth client. Replace GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REFRESH_TOKEN with credentials/token from your own Google Cloud project before running conversions."
+          if [ "$client_project" != "160241343420" ]; then
+            echo "::error::Wrong Google OAuth project. This workflow only accepts the private repository OAuth client for project 160241343420; the public rclone client 202264815644 is forbidden."
             exit 1
           fi
-
-          echo "Using private Google OAuth project prefix: $client_project"
 
           token_response=$(curl -fsS --request POST \
             --data-urlencode "client_id=$GOOGLE_CLIENT_ID" \
