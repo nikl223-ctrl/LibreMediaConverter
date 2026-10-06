@@ -1,0 +1,44 @@
+name: One-time encrypted OAuth migration
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export-encrypted:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Encrypt private Drive OAuth settings for proxy server
+        shell: bash
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          PROXY_PUBLIC_KEY_B64: LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUlJQ0lqQU5CZ2txaGtpRzl3MEJBUUVGQUFPQ0FnOEFNSUlDQ2dLQ0FnRUFtdkkzbFNUaHNFMW4wWWMrSS9sRwpiK3NsNGdRQVBjc09xWWdFQ1BaSFJ2TURLQndFRzFSYVRxREphL1FUNk5RNDRCSElnYTdYY3dqZTNKYTY1U2NYCkpxUlRLQmUvKysxSGlFelBlWUwxMVE0d0pDSlRBTzhGUyttYktGbXlJcmlxTFFBOEJUaUhIdXZWTFFBdEp1UHgKaHFuZkxDUEJZT0U3RWp6RnZXRDc1dzFNaFN6cVpKbTZGSStieVUwT1JvUG5CNDhaZnBRemQyWjY4QitRV2pVVwpqdjVwQlZ6Qlh4MXd6Z3d4TU54RTV5TjdJWlNxNjAwSS84dW1uOE43enpDeE4vbmxpOFZwcjR3Z285dFVtcTVrCnA1amRrTXFub01iV21BOWNzY1NpaEM1L0l0b3ZwbUxobEErZmVlU1lNbS81bmVkcm1YbHBPem1uUHhLQUd2eDUKT3N1Tm1aeVFSUXlwYkxtMkhyWGxmRlo1Z2VVMEtnR2ovemozZXhTYm1qWVdYL002U0JhN1VYV21xdXdZY1lSWQpuUnVXMDRqN05YKzEzMGFVdFZrYXUxOGR2UHhjR2dBU3l3eVdxNkRTNnhFcGo1MDhaOEFac0NSNGRsaUZydHY0Clc5dytiMEMrL0cvN1hwQk9RY3JZNU10RUU3cXdNaTR4a3BCeWIxVEh2RTBFUG4xajR0OTB4NnpIVU5ncjVJU0UKSmdEeVZxaTZNQzBpemtqUVAyMmZXQnROQ2l4ZlpjQk0xaG1Ob0xwdDg4OSs1NHpMMFZBSmllbjdpcVhmV0hYZAozNXVqeWRZSnBYZTQxbHdlVCtBMFU0Sll5NGphRkQxYnY3ZHUvQTJONkFGeWlZbHBRc25yMnY4L3JUWWthU0c4CkxKNFlBSy8wUjdCaDJMemZCbjN2UVpVQ0F3RUFBUT09Ci0tLS0tRU5EIFBVQkxJQyBLRVktLS0tLQo=
+        run: |
+          set -euo pipefail
+          umask 077
+          for var in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET GOOGLE_REFRESH_TOKEN; do
+            [ -n "${!var:-}" ] || { echo "::error::Missing $var"; exit 1; }
+          done
+          printf '%s' "$PROXY_PUBLIC_KEY_B64" | base64 -d > public.pem
+          jq -cn \
+            --arg client_id "$GOOGLE_CLIENT_ID" \
+            --arg client_secret "$GOOGLE_CLIENT_SECRET" \
+            --arg refresh_token "$GOOGLE_REFRESH_TOKEN" \
+            '{client_id:$client_id,client_secret:$client_secret,refresh_token:$refresh_token}' > oauth.json
+          openssl pkeyutl -encrypt -pubin -inkey public.pem \
+            -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 \
+            -in oauth.json -out private-oauth.enc
+          rm -f oauth.json public.pem
+
+      - name: Upload encrypted settings
+        uses: actions/upload-artifact@v4
+        with:
+          name: proxy-private-oauth
+          path: private-oauth.enc
+          retention-days: 1
+          if-no-files-found: error
