@@ -1,0 +1,52 @@
+name: Windows Random GPU Probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/windows-random-gpu-probe.yml"
+
+jobs:
+  gpu-probe:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Windows system info
+        shell: pwsh
+        run: |
+          Write-Host "=== OS / CPU / RAM ==="
+          Get-CimInstance Win32_OperatingSystem | Format-List Caption,Version,OSArchitecture,TotalVisibleMemorySize
+          Get-CimInstance Win32_Processor | Format-List Name,NumberOfCores,NumberOfLogicalProcessors
+
+      - name: Find any GPU or display adapter
+        shell: pwsh
+        run: |
+          Write-Host "=== Win32_VideoController ==="
+          Get-CimInstance Win32_VideoController | Format-List Name,AdapterCompatibility,AdapterRAM,DriverVersion,VideoProcessor,PNPDeviceID
+
+          Write-Host "=== PnP Display devices ==="
+          Get-PnpDevice -Class Display -ErrorAction SilentlyContinue | Format-List Status,Class,FriendlyName,InstanceId
+
+          Write-Host "=== Devices containing GPU/display/video terms ==="
+          Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
+            Where-Object { $_.FriendlyName -match 'GPU|Display|Graphics|Video|VGA' } |
+            Format-Table -AutoSize Status,Class,FriendlyName,InstanceId
+
+      - name: DirectX diagnostic
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "dxdiag.txt"
+          Start-Process dxdiag.exe -ArgumentList "/t",$out -Wait
+          if (Test-Path $out) {
+            Select-String -Path $out -Pattern "Card name:|Manufacturer:|Chip type:|Display Memory:|Dedicated Memory:|Driver Model:|Feature Levels:" -Context 0,0
+          }
+
+      - name: Probe common GPU compute interfaces
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Write-Host "=== nvidia-smi ==="
+          if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) { nvidia-smi } else { Write-Host "nvidia-smi not installed/found" }
+          Write-Host "=== Environment / virtualization ==="
+          Get-CimInstance Win32_ComputerSystem | Format-List Manufacturer,Model,HypervisorPresent
