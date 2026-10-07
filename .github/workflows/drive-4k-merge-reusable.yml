@@ -34,21 +34,21 @@ jobs:
           expiry=$(date -u -d "+3600 seconds" '+%Y-%m-%dT%H:%M:%SZ')
           token_json=$(jq -cn --arg at "$access_token" --arg rt "$GOOGLE_REFRESH_TOKEN" --arg ex "$expiry" '{access_token:$at,token_type:"Bearer",refresh_token:$rt,expiry:$ex}')
           rclone config create drive drive client_id "$GOOGLE_CLIENT_ID" client_secret "$GOOGLE_CLIENT_SECRET" scope drive token "$token_json" --non-interactive >/dev/null
-      - name: Download 20 lossless parts
+      - name: Download 20 4K 370M parts
         run: |
           mkdir -p /tmp/parts
           for n in $(seq -w 0 19); do
-            rclone copyto "drive:$PARTS_FOLDER/Die_Monster_AG_4K_FFV1_part_${n}.mkv" "/tmp/parts/part_${n}.mkv"
+            rclone copyto "drive:$PARTS_FOLDER/Die_Monster_AG_4K_370M_part_${n}.mp4" "/tmp/parts/part_${n}.mp4"
           done
-      - name: Merge and upload final losslessly
+      - name: Merge and upload final 4K 370M
         env:
           PARTS_DIR: /tmp/parts
-          FINAL_FILE: /tmp/Die_Monster_AG_4K_FFV1.mkv
+          FINAL_FILE: /tmp/Die_Monster_AG_4K_370M.mp4
         run: |
           chmod +x scripts/encode-4k-parallel.sh
           scripts/encode-4k-parallel.sh merge
-          rclone copyto "$FINAL_FILE" "drive:$DEST_FOLDER/Die_Monster_AG_4K_FFV1.mkv" --stats 10s
+          rclone copyto "$FINAL_FILE" "drive:$DEST_FOLDER/Die_Monster_AG_4K_370M.mp4" --stats 10s
       - name: Cleanup parts
         if: success()
         run: |
-          for n in $(seq -w 0 19); do rclone deletefile "drive:$PARTS_FOLDER/Die_Monster_AG_4K_FFV1_part_${n}.mkv" || true; done
+          for n in $(seq -w 0 19); do rclone deletefile "drive:$PARTS_FOLDER/Die_Monster_AG_4K_370M_part_${n}.mp4" || true; done
