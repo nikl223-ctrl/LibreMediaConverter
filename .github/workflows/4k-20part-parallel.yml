@@ -1,4 +1,4 @@
-name: 52K 20-Part Parallel Test
+name: 16K 20-Part Parallel Test
 
 on:
   workflow_dispatch:
@@ -17,7 +17,7 @@ jobs:
     uses: ./.github/workflows/drive-4k-segment-reusable.yml
     with:
       part: ${{ matrix.part }}
-      file_id: "1zWwJqHOB8SxPLZjOgR_ANvPxv-VF4IE9"
+      file_id: "1PqcshMwMYAvJXhbAzY_GXOBtyqlQOvm1"
     secrets: inherit
 
   merge:
