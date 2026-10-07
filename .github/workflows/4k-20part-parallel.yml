@@ -17,7 +17,7 @@ jobs:
     uses: ./.github/workflows/drive-4k-segment-reusable.yml
     with:
       part: ${{ matrix.part }}
-      file_id: "12LsP5m2WvZEaM0k2LjPZLfYF9_h4zAq8"
+      file_id: "1zWwJqHOB8SxPLZjOgR_ANvPxv-VF4IE9"
     secrets: inherit
 
   merge:
