@@ -1,4 +1,4 @@
-name: 4K 20-Part Parallel Converter
+name: 800K 20-Part Parallel Test
 
 on:
   workflow_dispatch:
