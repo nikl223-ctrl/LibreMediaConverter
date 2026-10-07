@@ -1,4 +1,4 @@
-name: Reusable 4K Segment
+name: Reusable 800K Segment
 
 on:
   workflow_call:
@@ -47,17 +47,17 @@ jobs:
           f=$(find /tmp/input -maxdepth 1 -type f | head -n1)
           test -s "$f"
           mv "$f" /tmp/source.mp4
-      - name: Encode 4K H264 370M CBR part
+      - name: Encode 800K H264 20M part
         env:
           PART: ${{ inputs.part }}
           PARTS_DIR: /tmp/parts
         run: |
           chmod +x scripts/encode-4k-parallel.sh
           scripts/encode-4k-parallel.sh encode
-      - name: Upload 4K 370M part
+      - name: Upload 800K 20M part
         env:
           PART: ${{ inputs.part }}
         run: |
           printf -v pn "%02d" "$PART"
           rclone mkdir "drive:$PARTS_FOLDER"
-          rclone copyto "/tmp/parts/part_${pn}.mp4" "drive:$PARTS_FOLDER/Die_Monster_AG_4K_370M_part_${pn}.mp4" --stats 10s
+          rclone copyto "/tmp/parts/part_${pn}.mp4" "drive:$PARTS_FOLDER/Die_Monster_AG_800K_20M_part_${pn}.mp4" --stats 10s
