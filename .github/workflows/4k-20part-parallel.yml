@@ -1,0 +1,26 @@
+name: 4K 20-Part Parallel Converter
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "conversion-requests-4k20/*.txt"
+
+jobs:
+  encode:
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        part: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]
+    uses: ./.github/workflows/drive-4k-segment-reusable.yml
+    with:
+      part: ${{ matrix.part }}
+      file_id: "1NYq9c24nbGW_LVQxb970SXxa3KhHNtML"
+    secrets: inherit
+
+  merge:
+    needs: encode
+    uses: ./.github/workflows/drive-4k-merge-reusable.yml
+    secrets: inherit
