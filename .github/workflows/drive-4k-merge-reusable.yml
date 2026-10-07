@@ -1,4 +1,4 @@
-name: Reusable 4K Merge
+name: Reusable 800K Streaming Merge
 
 on:
   workflow_call:
@@ -16,7 +16,7 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends ffmpeg jq curl ca-certificates
+          sudo apt-get install -y --no-install-recommends ffmpeg jq curl ca-certificates fuse3
           curl -fsSL https://rclone.org/install.sh | sudo bash
       - name: Configure Drive
         env:
@@ -27,6 +27,7 @@ jobs:
           set -euo pipefail
           client_project="${GOOGLE_CLIENT_ID%%-*}"
           test "$client_project" = "160241343420"
+          test "$client_project" != "202264815644"
           token_response=$(curl -fsS --request POST --data-urlencode "client_id=$GOOGLE_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_REFRESH_TOKEN" --data-urlencode "grant_type=refresh_token" https://oauth2.googleapis.com/token)
           access_token=$(printf '%s' "$token_response" | jq -r '.access_token // empty')
           test -n "$access_token"
@@ -34,21 +35,27 @@ jobs:
           expiry=$(date -u -d "+3600 seconds" '+%Y-%m-%dT%H:%M:%SZ')
           token_json=$(jq -cn --arg at "$access_token" --arg rt "$GOOGLE_REFRESH_TOKEN" --arg ex "$expiry" '{access_token:$at,token_type:"Bearer",refresh_token:$rt,expiry:$ex}')
           rclone config create drive drive client_id "$GOOGLE_CLIENT_ID" client_secret "$GOOGLE_CLIENT_SECRET" scope drive token "$token_json" --non-interactive >/dev/null
-      - name: Download 20 4K 370M parts
+      - name: Stream merge Drive to Drive
         run: |
-          mkdir -p /tmp/parts
+          set -euo pipefail
+          mkdir -p /mnt/driveparts /tmp/rclone-cache
+          rclone mount "drive:$PARTS_FOLDER" /mnt/driveparts --daemon --vfs-cache-mode minimal --cache-dir /tmp/rclone-cache
+          for i in $(seq 1 30); do mountpoint -q /mnt/driveparts && break; sleep 1; done
+          mountpoint -q /mnt/driveparts
+          LIST=/tmp/concat-800k.txt
+          : > "$LIST"
           for n in $(seq -w 0 19); do
-            rclone copyto "drive:$PARTS_FOLDER/Die_Monster_AG_4K_370M_part_${n}.mp4" "/tmp/parts/part_${n}.mp4"
+            f="/mnt/driveparts/Die_Monster_AG_800K_20M_part_${n}.mp4"
+            test -s "$f"
+            printf "file '%s'\n" "$f" >> "$LIST"
           done
-      - name: Merge and upload final 4K 370M
-        env:
-          PARTS_DIR: /tmp/parts
-          FINAL_FILE: /tmp/Die_Monster_AG_4K_370M.mp4
-        run: |
-          chmod +x scripts/encode-4k-parallel.sh
-          scripts/encode-4k-parallel.sh merge
-          rclone copyto "$FINAL_FILE" "drive:$DEST_FOLDER/Die_Monster_AG_4K_370M.mp4" --stats 10s
+          ffmpeg -hide_banner -f concat -safe 0 -i "$LIST" -c copy \
+            -movflags +frag_keyframe+empty_moov+default_base_moof -f mp4 - | \
+            rclone rcat "drive:$DEST_FOLDER/Die_Monster_AG_800K_20M.mp4" --stats 10s
+          bytes=$(rclone size "drive:$DEST_FOLDER/Die_Monster_AG_800K_20M.mp4" --json | jq -r '.bytes')
+          echo "final_bytes=$bytes"
+          test "$bytes" -le 100000000000
       - name: Cleanup parts
         if: success()
         run: |
-          for n in $(seq -w 0 19); do rclone deletefile "drive:$PARTS_FOLDER/Die_Monster_AG_4K_370M_part_${n}.mp4" || true; done
+          for n in $(seq -w 0 19); do rclone deletefile "drive:$PARTS_FOLDER/Die_Monster_AG_800K_20M_part_${n}.mp4" || true; done
