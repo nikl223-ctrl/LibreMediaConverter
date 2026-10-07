@@ -1,4 +1,4 @@
-name: Reusable 52K Streaming Merge
+name: Reusable 16K Streaming Merge
 
 on:
   workflow_call:
@@ -42,20 +42,20 @@ jobs:
           rclone mount "drive:$PARTS_FOLDER" /mnt/driveparts --daemon --vfs-cache-mode minimal --cache-dir /tmp/rclone-cache
           for i in $(seq 1 30); do mountpoint -q /mnt/driveparts && break; sleep 1; done
           mountpoint -q /mnt/driveparts
-          LIST=/tmp/concat-52k.txt
+          LIST=/tmp/concat-16k.txt
           : > "$LIST"
           for n in $(seq -w 0 19); do
-            f="/mnt/driveparts/Die_Monster_AG_52K_20M_part_${n}.mp4"
+            f="/mnt/driveparts/Die_Monster_AG_16K_20M_part_${n}.mp4"
             test -s "$f"
             printf "file '%s'\n" "$f" >> "$LIST"
           done
           ffmpeg -hide_banner -f concat -safe 0 -i "$LIST" -c copy \
             -movflags +frag_keyframe+empty_moov+default_base_moof -f mp4 - | \
-            rclone rcat "drive:$DEST_FOLDER/Die_Monster_AG_52K_20M.mp4" --stats 10s
-          bytes=$(rclone size "drive:$DEST_FOLDER/Die_Monster_AG_52K_20M.mp4" --json | jq -r '.bytes')
+            rclone rcat "drive:$DEST_FOLDER/Die_Monster_AG_16K_20M.mp4" --stats 10s
+          bytes=$(rclone size "drive:$DEST_FOLDER/Die_Monster_AG_16K_20M.mp4" --json | jq -r '.bytes')
           echo "final_bytes=$bytes"
           test "$bytes" -le 100000000000
       - name: Cleanup parts
         if: success()
         run: |
-          for n in $(seq -w 0 19); do rclone deletefile "drive:$PARTS_FOLDER/Die_Monster_AG_52K_20M_part_${n}.mp4" || true; done
+          for n in $(seq -w 0 19); do rclone deletefile "drive:$PARTS_FOLDER/Die_Monster_AG_16K_20M_part_${n}.mp4" || true; done
