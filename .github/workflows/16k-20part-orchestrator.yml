@@ -2,6 +2,10 @@ name: 16K 20-Part Orchestrator
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "conversion-requests-16k20/*.txt"
 
 jobs:
   encode:
