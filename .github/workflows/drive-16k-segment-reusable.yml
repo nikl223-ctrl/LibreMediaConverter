@@ -1,0 +1,63 @@
+name: Reusable 16K Segment
+
+on:
+  workflow_call:
+    inputs:
+      part:
+        required: true
+        type: number
+      file_id:
+        required: true
+        type: string
+
+jobs:
+  segment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      RCLONE_CONFIG: /tmp/rclone.conf
+      PARTS_FOLDER: "Video Converter/Fertig/.16k-parts"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg jq curl ca-certificates
+          curl -fsSL https://rclone.org/install.sh | sudo bash
+      - name: Configure Drive
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+          client_project="${GOOGLE_CLIENT_ID%%-*}"
+          test "$client_project" = "160241343420"
+          token_response=$(curl -fsS --request POST --data-urlencode "client_id=$GOOGLE_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_REFRESH_TOKEN" --data-urlencode "grant_type=refresh_token" https://oauth2.googleapis.com/token)
+          access_token=$(printf '%s' "$token_response" | jq -r '.access_token // empty')
+          test -n "$access_token"
+          echo "::add-mask::$access_token"
+          expiry=$(date -u -d "+3600 seconds" '+%Y-%m-%dT%H:%M:%SZ')
+          token_json=$(jq -cn --arg at "$access_token" --arg rt "$GOOGLE_REFRESH_TOKEN" --arg ex "$expiry" '{access_token:$at,token_type:"Bearer",refresh_token:$rt,expiry:$ex}')
+          rclone config create drive drive client_id "$GOOGLE_CLIENT_ID" client_secret "$GOOGLE_CLIENT_SECRET" scope drive token "$token_json" --non-interactive >/dev/null
+      - name: Download source
+        run: |
+          mkdir -p /tmp/input
+          rclone backend copyid drive: "${{ inputs.file_id }}" /tmp/input/
+          f=$(find /tmp/input -maxdepth 1 -type f | head -n1)
+          test -s "$f"
+          mv "$f" /tmp/source.mp4
+      - name: Encode part
+        env:
+          PART: ${{ inputs.part }}
+          PARTS_DIR: /tmp/parts
+        run: |
+          chmod +x scripts/encode-16k-parallel.sh
+          scripts/encode-16k-parallel.sh encode
+      - name: Upload part
+        env:
+          PART: ${{ inputs.part }}
+        run: |
+          printf -v pn "%02d" "$PART"
+          rclone mkdir "drive:$PARTS_FOLDER"
+          rclone copyto "/tmp/parts/part_${pn}.mp4" "drive:$PARTS_FOLDER/The_Old_Way_16K_x20_part_${pn}.mp4" --stats 10s
