@@ -115,9 +115,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          request_file=$(git show --pretty="" --name-only "$GITHUB_SHA" \
-            | grep -E '^conversion-requests-h264/[^/]+\.txt$' \
-            | tail -n 1 || true)
+          request_file=$(ls -1t conversion-requests-16k/*.txt 2>/dev/null | head -n 1 || true)
 
           if [ -z "$request_file" ] || [ ! -f "$request_file" ]; then
             echo "::error::No H264 conversion request found."
