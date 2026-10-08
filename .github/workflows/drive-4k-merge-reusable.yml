@@ -35,25 +35,40 @@ jobs:
           expiry=$(date -u -d "+3600 seconds" '+%Y-%m-%dT%H:%M:%SZ')
           token_json=$(jq -cn --arg at "$access_token" --arg rt "$GOOGLE_REFRESH_TOKEN" --arg ex "$expiry" '{access_token:$at,token_type:"Bearer",refresh_token:$rt,expiry:$ex}')
           rclone config create drive drive client_id "$GOOGLE_CLIENT_ID" client_secret "$GOOGLE_CLIENT_SECRET" scope drive token "$token_json" --non-interactive >/dev/null
-      - name: Stream merge Drive to Drive
+      - name: Stream merge Drive to Drive without local movie storage
         run: |
           set -euo pipefail
-          mkdir -p /tmp/driveparts /tmp/rclone-cache
-          rclone mount "drive:$PARTS_FOLDER" /tmp/driveparts --daemon --vfs-cache-mode minimal --cache-dir /tmp/rclone-cache
-          for i in $(seq 1 30); do mountpoint -q /tmp/driveparts && break; sleep 1; done
-          mountpoint -q /tmp/driveparts
-          LIST=/tmp/concat-16k.txt
-          : > "$LIST"
-          for n in $(seq -w 0 19); do
-            f="/tmp/driveparts/Oben_16K_20M_part_${n}.mp4"
-            test -s "$f"
-            printf "file '%s'\n" "$f" >> "$LIST"
-          done
-          ffmpeg -hide_banner -f concat -safe 0 -i "$LIST" -c copy \
-            -movflags +frag_keyframe+empty_moov+default_base_moof -f mp4 - | \
+          PIPE=/tmp/parts-stream.ts
+          rm -f "$PIPE"
+          mkfifo "$PIPE"
+
+          (
+            for n in $(seq -w 0 19); do
+              remote="drive:$PARTS_FOLDER/Oben_16K_20M_part_${n}.mp4"
+              echo "Streaming part ${n} from Drive"
+              rclone cat "$remote" | ffmpeg -hide_banner -loglevel warning -i pipe:0 -map 0:v:0 -map 0:a:0? -c copy -f mpegts pipe:1
+            done
+          ) > "$PIPE" &
+          PRODUCER_PID=$!
+
+          set +e
+          ffmpeg -hide_banner -loglevel warning -f mpegts -i "$PIPE" -map 0:v:0 -map 0:a:0? -c copy \
+            -movflags +frag_keyframe+empty_moov+default_base_moof -f mp4 pipe:1 | \
             rclone rcat "drive:$DEST_FOLDER/Oben_16K_20M.mp4" --stats 10s
+          MERGE_RC=${PIPESTATUS[0]}
+          UPLOAD_RC=${PIPESTATUS[1]}
+          wait "$PRODUCER_PID"
+          PRODUCER_RC=$?
+          set -e
+
+          rm -f "$PIPE"
+          test "$PRODUCER_RC" -eq 0
+          test "$MERGE_RC" -eq 0
+          test "$UPLOAD_RC" -eq 0
+
           bytes=$(rclone size "drive:$DEST_FOLDER/Oben_16K_20M.mp4" --json | jq -r '.bytes')
           echo "final_bytes=$bytes"
+          test "$bytes" -gt 0
           test "$bytes" -le 100000000000
       - name: Cleanup parts
         if: success()
