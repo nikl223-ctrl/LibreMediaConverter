@@ -1,0 +1,11 @@
+name: Merge Oben 16K Existing Parts
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "conversion-requests-merge16k/*.txt"
+jobs:
+  merge:
+    uses: ./.github/workflows/drive-4k-merge-reusable.yml
+    secrets: inherit
