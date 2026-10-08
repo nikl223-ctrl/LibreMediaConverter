@@ -38,14 +38,14 @@ jobs:
       - name: Stream merge Drive to Drive
         run: |
           set -euo pipefail
-          mkdir -p /mnt/driveparts /tmp/rclone-cache
-          rclone mount "drive:$PARTS_FOLDER" /mnt/driveparts --daemon --vfs-cache-mode minimal --cache-dir /tmp/rclone-cache
-          for i in $(seq 1 30); do mountpoint -q /mnt/driveparts && break; sleep 1; done
-          mountpoint -q /mnt/driveparts
+          mkdir -p /tmp/driveparts /tmp/rclone-cache
+          rclone mount "drive:$PARTS_FOLDER" /tmp/driveparts --daemon --vfs-cache-mode minimal --cache-dir /tmp/rclone-cache
+          for i in $(seq 1 30); do mountpoint -q /tmp/driveparts && break; sleep 1; done
+          mountpoint -q /tmp/driveparts
           LIST=/tmp/concat-16k.txt
           : > "$LIST"
           for n in $(seq -w 0 19); do
-            f="/mnt/driveparts/Die_Monster_AG_16K_20M_part_${n}.mp4"
+            f="/tmp/driveparts/Die_Monster_AG_16K_20M_part_${n}.mp4"
             test -s "$f"
             printf "file '%s'\n" "$f" >> "$LIST"
           done
