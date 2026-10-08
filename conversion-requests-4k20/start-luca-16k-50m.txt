@@ -1,0 +1,1 @@
+Start Luca 16K UHD 15360x8640 H264 50 Mbps x20. Segment names Luca_16K_50M_part_XX.mp4; streaming merge output Luca_16K_50M.mp4; final <=100 GB.
