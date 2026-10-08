@@ -53,17 +53,17 @@ jobs:
           f=$(find /tmp/input -maxdepth 1 -type f | head -n1)
           test -s "$f"
           mv "$f" /tmp/source.mp4
-      - name: Encode 16K H264 20M part
+      - name: Encode 16K H264 50M part
         env:
           PART: ${{ inputs.part }}
           PARTS_DIR: /tmp/parts
         run: |
           chmod +x scripts/encode-4k-parallel.sh
           scripts/encode-4k-parallel.sh encode
-      - name: Upload 16K 20M part
+      - name: Upload 16K 50M part
         env:
           PART: ${{ inputs.part }}
         run: |
           printf -v pn "%02d" "$PART"
           rclone mkdir "drive:$PARTS_FOLDER"
-          rclone copyto "/tmp/parts/part_${pn}.mp4" "drive:$PARTS_FOLDER/Die_Monster_AG_16K_20M_part_${pn}.mp4" --stats 10s
+          rclone copyto "/tmp/parts/part_${pn}.mp4" "drive:$PARTS_FOLDER/Luca_16K_50M_part_${pn}.mp4" --stats 10s
