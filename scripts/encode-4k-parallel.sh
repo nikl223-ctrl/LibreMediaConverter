@@ -6,7 +6,7 @@ PARTS_DIR="${PARTS_DIR:-/tmp/parts}"
 PART_COUNT="${PART_COUNT:-20}"
 WIDTH="${WIDTH:-15360}"
 HEIGHT="${HEIGHT:-8640}"
-VIDEO_BITRATE="${VIDEO_BITRATE:-20M}"
+VIDEO_BITRATE="${VIDEO_BITRATE:-50M}"
 mkdir -p "$PARTS_DIR"
 if [[ "$MODE" == "encode" ]]; then
   PART="${PART:?PART required}"
@@ -21,7 +21,7 @@ if [[ "$MODE" == "encode" ]]; then
     -map 0:v:0 -map 0:a:0? \
     -vf "scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=decrease:flags=fast_bilinear,pad=${WIDTH}:${HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1" \
     -fps_mode passthrough -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
-    -b:v "$VIDEO_BITRATE" -maxrate "$VIDEO_BITRATE" -bufsize 40M \
+    -b:v "$VIDEO_BITRATE" -maxrate "$VIDEO_BITRATE" -bufsize 100M \
     -c:a aac -b:a 192k -ar 48000 -movflags +faststart "$OUT"
   SIZE=$(stat -c%s "$OUT")
   test "$SIZE" -le 5000000000
