@@ -47,7 +47,7 @@ var rng := RandomNumberGenerator.new()
 func _ready() -> void:
     rng.randomize()
     _build_materials()
-    var outdoor := OUTDOOR_SCRIPT.new()
+    var outdoor = OUTDOOR_SCRIPT.new()
     outdoor.name = "RiverlandsOutdoorWorld"
     add_child(outdoor)
     outdoor.generate(self)
