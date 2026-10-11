@@ -42,8 +42,8 @@ var camera: Camera3D
 var gun_holder: Node3D
 var muzzle_light: OmniLight3D
 var hud: Control
-var rpg: Node3D
-var outdoor_world: Node3D
+var rpg
+var outdoor_world
 var sounds: Dictionary = {}
 var rng := RandomNumberGenerator.new()
 
