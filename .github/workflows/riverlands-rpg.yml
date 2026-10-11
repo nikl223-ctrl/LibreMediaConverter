@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: riverlands-rpg-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   graphics-4k:
     name: "Worker 1 / Render original 4096px nature textures"
