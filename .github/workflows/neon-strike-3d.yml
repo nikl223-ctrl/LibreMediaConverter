@@ -83,6 +83,16 @@ jobs:
             exit 1
           fi
 
+      - name: Smoke-test 3D game startup
+        shell: bash
+        run: |
+          set -o pipefail
+          godot --headless --path NeonStrike3D --quit-after 20 2>&1 | tee "$RUNNER_TEMP/godot-play.log"
+          if grep -E "SCRIPT ERROR|Invalid call|Invalid assignment|Parse Error" "$RUNNER_TEMP/godot-play.log"; then
+            echo "Game scene failed the runtime smoke test."
+            exit 1
+          fi
+
       - name: Export Android APK
         env:
           GODOT_ANDROID_KEYSTORE_DEBUG_PATH: ${{ runner.temp }}/neon-debug.keystore
