@@ -52,16 +52,16 @@ func _draw() -> void:
             draw_line(Vector2(0.0, y), Vector2(w, y), Color(0.12, 0.45, 0.65, 0.12), 1.0)
         draw_rect(Rect2(Vector2(w * 0.21, h * 0.19), Vector2(w * 0.58, h * 0.60)), Color(0.025, 0.065, 0.12, 0.88))
         draw_rect(Rect2(Vector2(w * 0.21, h * 0.19), Vector2(w * 0.58, h * 0.60)), cyan, false, 3.0 * s)
-        _center("N E O N  S T R I K E", h * 0.355, int(64.0 * s), cyan)
-        _center("3 D  //  SURVIVAL ARENA", h * 0.414, int(24.0 * s), pink)
-        _center("WELLEN UEBERLEBEN  •  ZIELE AUSSCHALTEN  •  BOOSTEN", h * 0.51, int(20.0 * s), muted)
+        _center("R I V E R L A N D S", h * 0.355, int(64.0 * s), cyan)
+        _center("3D / RIVER SURVIVAL", h * 0.414, int(24.0 * s), pink)
+        _center("NATURARENA  /  FLUSS  /  GEGNERWELLEN", h * 0.51, int(20.0 * s), muted)
         _center("TIPPEN ZUM STARTEN", h * 0.651, int(31.0 * s), white)
         _center("LINKS: BEWEGEN     RECHTS: ZIELEN / FEUERN", h * 0.72, int(17.0 * s), muted)
         return
 
     # Peripheral, unobtrusive corner HUD.
     _outlined_rect(Rect2(Vector2(26.0 * s, 22.0 * s), Vector2(347.0 * s, 91.0 * s)), dark, Color(0.23, 0.67, 0.80, 0.55))
-    _print("NEON / STRIKE 3D", Vector2(43.0 * s, 54.0 * s), int(24.0 * s), cyan)
+    _print("RIVERLANDS / STRIKE", Vector2(43.0 * s, 54.0 * s), int(24.0 * s), cyan)
     _print("WELLE %02d  |  SCORE %06d" % [game.wave, game.score], Vector2(43.0 * s, 89.0 * s), int(18.0 * s), white)
 
     var hp_rect := Rect2(Vector2(32.0 * s, 130.0 * s), Vector2(332.0 * s, 20.0 * s))
