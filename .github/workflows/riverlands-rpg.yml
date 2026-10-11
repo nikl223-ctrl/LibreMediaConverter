@@ -85,7 +85,7 @@ jobs:
       - name: Download 2K texture output from independent 4K worker
         uses: actions/download-artifact@v4
         with:
-          name: Riverlands-Android-Textures
+          name: Riverlands-RPG-Android-Textures
           path: NeonStrike3D/assets/generated
 
       - name: Confirm 4K worker texture outputs are present
