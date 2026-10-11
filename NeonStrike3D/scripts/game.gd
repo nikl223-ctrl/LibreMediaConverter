@@ -4,6 +4,7 @@ extends Node3D
 
 const HUD_SCRIPT = preload("res://scripts/hud.gd")
 const OUTDOOR_SCRIPT = preload("res://scripts/outdoor.gd")
+const RPG_SCRIPT = preload("res://scripts/rpg.gd")
 const ARENA_HALF: float = 43.0
 const PLAYER_SPEED: float = 9.0
 const SHOT_INTERVAL: float = 0.115
@@ -41,6 +42,8 @@ var camera: Camera3D
 var gun_holder: Node3D
 var muzzle_light: OmniLight3D
 var hud: Control
+var rpg: Node3D
+var outdoor_world: Node3D
 var sounds: Dictionary = {}
 var rng := RandomNumberGenerator.new()
 
@@ -50,8 +53,13 @@ func _ready() -> void:
     var outdoor = OUTDOOR_SCRIPT.new()
     outdoor.name = "RiverlandsOutdoorWorld"
     add_child(outdoor)
+    outdoor_world = outdoor
     outdoor.generate(self)
     _build_player()
+    rpg = RPG_SCRIPT.new()
+    rpg.name = "RiverlandsRPG"
+    add_child(rpg)
+    rpg.initialize(self)
     _build_audio()
     var overlay := CanvasLayer.new()
     overlay.name = "Interface"
@@ -313,7 +321,9 @@ func begin_game() -> void:
     _reset_game()
     state = "playing"
     Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED if not OS.has_feature("mobile") else Input.MOUSE_MODE_VISIBLE)
-    _start_wave()
+    rpg.start_adventure()
+    status_text = "KAPITEL 1  //  DAS VERLORENE LICHT"
+    status_timer = 4.0
 
 func _reset_game() -> void:
     for e in enemies:
@@ -382,17 +392,7 @@ func _physics_process(delta: float) -> void:
             remaining_spawns -= 1
             spawn_timer = maxf(0.26, 0.88 - float(wave) * 0.045)
 
-    if remaining_spawns == 0 and enemies.is_empty() and wave_wait < 0.0:
-        wave_wait = 3.4
-        score += 150 * wave
-        health = minf(max_health, health + 14.0)
-        status_text = "ARENA GESICHERT   +%d" % (150 * wave)
-        status_timer = 3.0
-
-    if wave_wait > 0.0:
-        wave_wait -= delta
-        if wave_wait <= 0.0:
-            _start_wave()
+    rpg.update_adventure(delta)
 
     if (trigger_down or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)) and shoot_timer <= 0.0:
         fire()
@@ -495,8 +495,8 @@ func _blast(location: Vector3, is_brute: bool) -> void:
 func _spawn_enemy() -> void:
     var angle := rng.randf_range(0.0, TAU)
     var radius := rng.randf_range(19.0, 34.0)
-    var spawn_x := clampf(-18.0 + cos(angle) * radius, -39.0, -12.0)
-    var spawn_z := clampf(3.0 + sin(angle) * radius, -39.0, 39.0)
+    var spawn_x := clampf(player.global_position.x + cos(angle) * radius, -285.0, -14.0)
+    var spawn_z := clampf(player.global_position.z + sin(angle) * radius, -300.0, 300.0)
     var is_brute := wave >= 3 and rng.randf() < minf(0.36, float(wave) * 0.045)
     var unit := CharacterBody3D.new()
     unit.name = "Brute" if is_brute else "Sentinel"
@@ -595,6 +595,8 @@ func _damage_enemy(e: Dictionary, damage: float, impact: Vector3) -> void:
     score += 220 if is_brute else 100
     if kills % 6 == 0:
         _spawn_pickup(location)
+    if rpg != null:
+        rpg.on_enemy_defeated()
 
 func _spawn_pickup(location: Vector3) -> void:
     var root := Node3D.new()
@@ -668,6 +670,8 @@ func _unhandled_input(event: InputEvent) -> void:
                 begin_game()
         elif event.keycode == KEY_SPACE:
             request_dash()
+        elif event.keycode == KEY_M and state == "playing":
+            rpg.map_visible = not rpg.map_visible
     elif event is InputEventMouseButton and event.pressed:
         if state == "menu" or state == "dead":
             begin_game()
