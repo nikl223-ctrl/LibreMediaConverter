@@ -184,14 +184,14 @@ jobs:
           set -euxo pipefail
           mkdir -p NeonStrike3D/build
           godot --headless --path NeonStrike3D --export-debug "Android" "build/RiverlandsRPG.apk"
-          test -s NeonStrike3D/build/RiverlandsStrike3D.apk
-          unzip -t NeonStrike3D/build/RiverlandsStrike3D.apk | tail -1
-          ls -lh NeonStrike3D/build/RiverlandsStrike3D.apk
+          test -s NeonStrike3D/build/RiverlandsRPG.apk
+          unzip -t NeonStrike3D/build/RiverlandsRPG.apk | tail -1
+          ls -lh NeonStrike3D/build/RiverlandsRPG.apk
 
       - name: Upload downloadable APK
         uses: actions/upload-artifact@v4
         with:
           name: Riverlands-Story-RPG-APK
-          path: NeonStrike3D/build/RiverlandsStrike3D.apk
+          path: NeonStrike3D/build/RiverlandsRPG.apk
           retention-days: 30
           if-no-files-found: error
