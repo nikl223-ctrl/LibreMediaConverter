@@ -8,7 +8,7 @@ const RUINS := Vector3(-66.0, 0.0, -218.0)
 const RELIC := Vector3(-73.0, 0.0, -232.0)
 const SAVE_PATH := "user://riverlands_rpg.json"
 
-var game: Node3D
+var game
 var stage: int = 0
 var level: int = 1
 var experience: int = 0
