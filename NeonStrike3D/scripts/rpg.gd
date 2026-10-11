@@ -368,15 +368,15 @@ func _update_allies(delta: float) -> void:
         var body: CharacterBody3D = a["body"]
         var id: int = a["id"]
         var side := -1.0 if id == 0 else 1.0
-        var wanted := game.player.global_position - game.player.global_transform.basis.z * -1.5 + game.player.global_transform.basis.x * (side * 2.8)
+        var wanted: Vector3 = game.player.global_position - game.player.global_transform.basis.z * -1.5 + game.player.global_transform.basis.x * (side * 2.8)
         var dist := Vector2(body.global_position.x - wanted.x, body.global_position.z - wanted.z).length()
         if dist > 36.0:
             body.global_position = wanted
             body.velocity = Vector3.ZERO
-        var heading := wanted - body.global_position
+        var heading: Vector3 = wanted - body.global_position
         heading.y = 0.0
         if heading.length() > 1.8:
-            var direction := heading.normalized()
+            var direction: Vector3 = heading.normalized()
             var speed := 8.7 if id == 0 else 8.1
             body.velocity.x = direction.x * speed
             body.velocity.z = direction.z * speed
