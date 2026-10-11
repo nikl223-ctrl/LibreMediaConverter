@@ -1,0 +1,72 @@
+name: VVC 4K Single Worker
+on:
+  push:
+    branches: [main]
+    paths:
+      - "conversion-requests-vvc/*.txt"
+permissions:
+  contents: read
+jobs:
+  vvc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Install VVenC and FFmpeg
+        run: |
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          timeout 300s sudo apt-get update -qq
+          timeout 300s sudo apt-get install -y --no-install-recommends git build-essential cmake ninja-build pkg-config nasm yasm libssl-dev libx264-dev libopus-dev libvpx-dev libass-dev curl jq ca-certificates
+          git clone --depth 1 https://github.com/fraunhoferhhi/vvenc.git /tmp/vvenc
+          cmake -S /tmp/vvenc -B /tmp/vvenc/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON
+          cmake --build /tmp/vvenc/build -j 2
+          sudo cmake --install /tmp/vvenc/build
+          sudo ldconfig
+          git clone --depth 1 --branch release/8.0 https://github.com/FFmpeg/FFmpeg.git /tmp/ffmpeg
+          cd /tmp/ffmpeg
+          ./configure --prefix=/usr/local --enable-gpl --enable-libvvenc --enable-libx264 --disable-debug
+          make -j 2
+          sudo make install
+          ffmpeg -hide_banner -h encoder=libvvenc
+          curl -fsSL --max-time 60 https://rclone.org/install.sh | timeout 180s sudo bash
+      - name: Configure private Drive OAuth
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+          [ "${GOOGLE_CLIENT_ID%%-*}" = "160241343420" ] || exit 1
+          [ -n "$GOOGLE_CLIENT_SECRET" ] && [ -n "$GOOGLE_REFRESH_TOKEN" ]
+          rclone config create drive drive client_id "$GOOGLE_CLIENT_ID" client_secret "$GOOGLE_CLIENT_SECRET" scope drive token "$(jq -nc --arg rt "$GOOGLE_REFRESH_TOKEN" '{access_token:"",token_type:"Bearer",refresh_token:$rt,expiry:"2000-01-01T00:00:00Z"}')" --non-interactive >/dev/null
+          rclone about drive: >/dev/null
+      - name: Convert 4K H266 and stream to Drive
+        env:
+          RCLONE_CONFIG: /home/runner/.config/rclone/rclone.conf
+        run: |
+          set -euo pipefail
+          request=$(git show --pretty="" --name-only "$GITHUB_SHA" | grep '^conversion-requests-vvc/.*\.txt$' | tail -n 1)
+          file_id=$(head -n1 "$request" | tr -d '\r\n ')
+          mkdir -p "$RUNNER_TEMP/input"
+          rclone backend copyid drive: "$file_id" "$RUNNER_TEMP/input/" --stats 10s
+          source=$(find "$RUNNER_TEMP/input" -type f | head -n1)
+          [ -s "$source" ]
+          base=$(basename "$source"); stem="${base%.*}"
+          output="Video Converter/Fertig/${stem}_4K_H266_VVC_5.1.mkv"
+          rclone mkdir "drive:Video Converter/Fertig"
+          # Matroska streams without seeking and is finalized at EOF.
+          set +e
+          ffmpeg -hide_banner -stats_period 10 -i "$source" -map 0:v:0 -map '0:a:0?' \
+            -vf 'scale=3840:2160:force_original_aspect_ratio=decrease,pad=3840:2160:(ow-iw)/2:(oh-ih)/2,format=yuv420p10le' \
+            -c:v libvvenc -preset faster -b:v 12000k -pix_fmt yuv420p10le \
+            -c:a ac3 -ac 6 -b:a 640k -f matroska pipe:1 \
+            | rclone rcat "drive:$output" --drive-chunk-size 128M --stats 10s --retries 10
+          status=( "${PIPESTATUS[@]}" )
+          set -e
+          [ "${status[0]}" -eq 0 ] && [ "${status[1]}" -eq 0 ] || exit 1
+          size=$(rclone size --json "drive:$output" | jq -r '.bytes // 0')
+          [ "$size" -gt 0 ] && [ "$size" -le 256000000000 ]
+          echo "Completed: $output ($size bytes)" >> "$GITHUB_STEP_SUMMARY"
