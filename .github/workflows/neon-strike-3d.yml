@@ -28,11 +28,11 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install Android platform and build tools
         run: |
+          set -euxo pipefail
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          command -v sdkmanager
           sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Download Godot 4.5.2 and matching Android export templates
