@@ -54,7 +54,7 @@ func _ready() -> void:
     overlay.name = "Interface"
     add_child(overlay)
     hud = HUD_SCRIPT.new()
-    hud.game = self
+    hud.set("game", self)
     overlay.add_child(hud)
     hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
     Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
