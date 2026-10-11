@@ -28,6 +28,13 @@ func generate(game: Node3D) -> void:
     _create_rocks()
     _create_clouds()
 
+func _safe_tex(path: String) -> Texture2D:
+    if ResourceLoader.exists(path):
+        return load(path) as Texture2D
+    var fallback := Image.create(32, 32, false, Image.FORMAT_RGB8)
+    fallback.fill(Color("#8c9a7b"))
+    return ImageTexture.create_from_image(fallback)
+
 func _mat(tex_path: String, tint: Color, roughness: float = 0.94) -> StandardMaterial3D:
     var material := StandardMaterial3D.new()
     material.albedo_color = tint
@@ -73,8 +80,8 @@ void fragment() {
 }
 """
     ground_material.shader = terrain_shader
-    ground_material.set_shader_parameter("grass_tex", load(GRASS_TEX))
-    ground_material.set_shader_parameter("soil_tex", load(SOIL_TEX))
+    ground_material.set_shader_parameter("grass_tex", _safe_tex(GRASS_TEX))
+    ground_material.set_shader_parameter("soil_tex", _safe_tex(SOIL_TEX))
 
     water_material = ShaderMaterial.new()
     var river_shader := Shader.new()
@@ -97,7 +104,7 @@ void fragment() {
 }
 """
     water_material.shader = river_shader
-    water_material.set_shader_parameter("water_tex", load(WATER_TEX))
+    water_material.set_shader_parameter("water_tex", _safe_tex(WATER_TEX))
 
 func _make_daylight() -> void:
     var we := WorldEnvironment.new()
