@@ -1,0 +1,193 @@
+name: Riverlands Story RPG - High Detail Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - riverlands-rpg
+    paths:
+      - "NeonStrike3D/**"
+      - ".github/workflows/riverlands-rpg.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  graphics-4k:
+    name: "Worker 1 / Render original 4096px nature textures"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout Riverlands game sources
+        uses: actions/checkout@v4
+
+      - name: Prepare Python 3.11 image-render environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install CPU 4K material renderer dependencies
+        run: python -m pip install --upgrade numpy pillow
+
+      - name: Render 4096x4096 grass, soil, bark, rock and river
+        run: |
+          set -euxo pipefail
+          python NeonStrike3D/tools/generate_4k_textures.py \
+            --size 4096 --mobile-size 2048 \
+            --master "$RUNNER_TEMP/riverlands-master" \
+            --out NeonStrike3D/assets/generated
+
+      - name: Verify texture sizes and mobile assets
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from PIL import Image
+          master = Path(__import__("os").environ["RUNNER_TEMP"]) / "riverlands-master"
+          mobile = Path("NeonStrike3D/assets/generated")
+          for label in ("grass", "soil", "bark", "rock", "water"):
+              with Image.open(master / f"{label}_4k.jpg") as im:
+                  assert im.size == (4096, 4096), (label, im.size)
+              with Image.open(mobile / f"{label}_mobile.jpg") as im:
+                  assert im.size == (2048, 2048), (label, im.size)
+          print("PASS: 5 textures at 4096x4096 + 5 Android textures at 2048x2048")
+          PY
+
+      - name: Publish original full-resolution 4K materials
+        uses: actions/upload-artifact@v4
+        with:
+          name: Riverlands-RPG-4K-Master-Textures
+          path: ${{ runner.temp }}/riverlands-master/*.jpg
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Hand 2K optimized textures to Android build worker
+        uses: actions/upload-artifact@v4
+        with:
+          name: Riverlands-RPG-Android-Textures
+          path: NeonStrike3D/assets/generated/*.jpg
+          retention-days: 30
+          if-no-files-found: error
+
+  android-apk:
+    needs: graphics-4k
+    name: "Worker 2 / Build Riverlands ARM64 Android APK"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout game branch
+        uses: actions/checkout@v4
+
+      - name: Download 2K texture output from independent 4K worker
+        uses: actions/download-artifact@v4
+        with:
+          name: Riverlands-Android-Textures
+          path: NeonStrike3D/assets/generated
+
+      - name: Confirm 4K worker texture outputs are present
+        run: |
+          ls -lh NeonStrike3D/assets/generated
+          test "$(find NeonStrike3D/assets/generated -name '*_mobile.jpg' | wc -l)" -eq 5
+
+      - name: Install JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Android platform and build tools
+        run: |
+          set -euxo pipefail
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f | sort -V | tail -n1)"
+          test -n "$SDKMANAGER"
+          echo "Using $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Download Godot 4.5.2 and matching Android export templates
+        run: |
+          set -euxo pipefail
+          wget -q -O "$RUNNER_TEMP/godot.zip" \
+            "https://github.com/godotengine/godot/releases/download/4.5.2-stable/Godot_v4.5.2-stable_linux.x86_64.zip"
+          wget -q -O "$RUNNER_TEMP/export.tpz" \
+            "https://github.com/godotengine/godot/releases/download/4.5.2-stable/Godot_v4.5.2-stable_export_templates.tpz"
+          mkdir -p "$RUNNER_TEMP/godot" "$RUNNER_TEMP/templates"
+          unzip -q "$RUNNER_TEMP/godot.zip" -d "$RUNNER_TEMP/godot"
+          unzip -q "$RUNNER_TEMP/export.tpz" -d "$RUNNER_TEMP/templates"
+          sudo install -m 0755 "$RUNNER_TEMP/godot/Godot_v4.5.2-stable_linux.x86_64" /usr/local/bin/godot
+          mkdir -p "$HOME/.local/share/godot/export_templates/4.5.2.stable"
+          cp "$RUNNER_TEMP/templates/templates/"* "$HOME/.local/share/godot/export_templates/4.5.2.stable/"
+          godot --version
+
+      - name: Configure Godot Android SDK and debug-signing
+        run: |
+          set -euxo pipefail
+          mkdir -p "$HOME/.config/godot"
+          cat > "$HOME/.config/godot/editor_settings-4.tres" <<EOF
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "$ANDROID_HOME"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          export/android/debug_keystore = "$RUNNER_TEMP/neon-debug.keystore"
+          export/android/debug_keystore_user = "androiddebugkey"
+          export/android/debug_keystore_pass = "android"
+          EOF
+          keytool -genkeypair -v \
+            -keystore "$RUNNER_TEMP/neon-debug.keystore" \
+            -storepass android -keypass android \
+            -alias androiddebugkey -keyalg RSA -keysize 2048 \
+            -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Import game and detect GDScript parser errors
+        shell: bash
+        run: |
+          set -o pipefail
+          godot --headless --editor --path NeonStrike3D --quit 2>&1 | tee "$RUNNER_TEMP/godot-import.log"
+          if grep -E "SCRIPT ERROR|Parse Error|Failed to load script" "$RUNNER_TEMP/godot-import.log"; then
+            echo "GDScript errors were detected; stopping the APK build."
+            exit 1
+          fi
+
+      - name: Smoke-test 3D game startup
+        shell: bash
+        run: |
+          set -o pipefail
+          godot --headless --path NeonStrike3D --quit-after 20 2>&1 | tee "$RUNNER_TEMP/godot-play.log"
+          if grep -E "SCRIPT ERROR|Invalid call|Invalid assignment|Parse Error" "$RUNNER_TEMP/godot-play.log"; then
+            echo "Game scene failed the runtime smoke test."
+            exit 1
+          fi
+
+      - name: Run actual playable RPG scenario test
+        shell: bash
+        run: |
+          set -o pipefail
+          godot --headless --path NeonStrike3D --script res://tools/test_rpg.gd 2>&1 | tee "$RUNNER_TEMP/rpg-test.log"
+          grep -q 'RPG_SMOKE_PASS' "$RUNNER_TEMP/rpg-test.log"
+          if grep -E 'SCRIPT ERROR|Invalid call|Invalid assignment|Parse Error' "$RUNNER_TEMP/rpg-test.log"; then
+            echo 'Gameplay test failed: check GDScript errors'
+            exit 1
+          fi
+
+      - name: Export Android APK
+        env:
+          GODOT_ANDROID_KEYSTORE_DEBUG_PATH: ${{ runner.temp }}/neon-debug.keystore
+          GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
+        run: |
+          set -euxo pipefail
+          mkdir -p NeonStrike3D/build
+          godot --headless --path NeonStrike3D --export-debug "Android" "build/RiverlandsRPG.apk"
+          test -s NeonStrike3D/build/RiverlandsStrike3D.apk
+          unzip -t NeonStrike3D/build/RiverlandsStrike3D.apk | tail -1
+          ls -lh NeonStrike3D/build/RiverlandsStrike3D.apk
+
+      - name: Upload downloadable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Riverlands-Story-RPG-APK
+          path: NeonStrike3D/build/RiverlandsStrike3D.apk
+          retention-days: 30
+          if-no-files-found: error
