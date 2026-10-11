@@ -1,0 +1,99 @@
+name: Neon Strike 3D APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - neon-strike-3d
+    paths:
+      - "NeonStrike3D/**"
+      - ".github/workflows/neon-strike-3d.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  android-apk:
+    name: Build Android ARM64 APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout game branch
+        uses: actions/checkout@v4
+
+      - name: Install JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform and build tools
+        run: |
+          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Download Godot 4.5.2 and matching Android export templates
+        run: |
+          set -euxo pipefail
+          wget -q --show-progress -O "$RUNNER_TEMP/godot.zip" \
+            "https://github.com/godotengine/godot/releases/download/4.5.2-stable/Godot_v4.5.2-stable_linux.x86_64.zip"
+          wget -q --show-progress -O "$RUNNER_TEMP/export.tpz" \
+            "https://github.com/godotengine/godot/releases/download/4.5.2-stable/Godot_v4.5.2-stable_export_templates.tpz"
+          mkdir -p "$RUNNER_TEMP/godot" "$RUNNER_TEMP/templates"
+          unzip -q "$RUNNER_TEMP/godot.zip" -d "$RUNNER_TEMP/godot"
+          unzip -q "$RUNNER_TEMP/export.tpz" -d "$RUNNER_TEMP/templates"
+          sudo install -m 0755 "$RUNNER_TEMP/godot/Godot_v4.5.2-stable_linux.x86_64" /usr/local/bin/godot
+          mkdir -p "$HOME/.local/share/godot/export_templates/4.5.2.stable"
+          cp "$RUNNER_TEMP/templates/templates/"* "$HOME/.local/share/godot/export_templates/4.5.2.stable/"
+          godot --version
+
+      - name: Configure Godot Android SDK and debug-signing
+        run: |
+          set -euxo pipefail
+          mkdir -p "$HOME/.config/godot"
+          cat > "$HOME/.config/godot/editor_settings-4.5.tres" <<EOF
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "$ANDROID_HOME"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          EOF
+          keytool -genkeypair -v \
+            -keystore "$RUNNER_TEMP/neon-debug.keystore" \
+            -storepass android -keypass android \
+            -alias androiddebugkey -keyalg RSA -keysize 2048 \
+            -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Import game and detect GDScript parser errors
+        shell: bash
+        run: |
+          set -o pipefail
+          godot --headless --editor --path NeonStrike3D --quit 2>&1 | tee "$RUNNER_TEMP/godot-import.log"
+          if grep -E "SCRIPT ERROR|Parse Error|Failed to load script" "$RUNNER_TEMP/godot-import.log"; then
+            echo "GDScript errors were detected; stopping the APK build."
+            exit 1
+          fi
+
+      - name: Export Android APK
+        env:
+          GODOT_ANDROID_KEYSTORE_DEBUG_PATH: ${{ runner.temp }}/neon-debug.keystore
+          GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
+        run: |
+          set -euxo pipefail
+          mkdir -p NeonStrike3D/build
+          godot --headless --path NeonStrike3D --export-debug "Android" "build/NeonStrike3D.apk"
+          test -s NeonStrike3D/build/NeonStrike3D.apk
+          unzip -t NeonStrike3D/build/NeonStrike3D.apk | tail -1
+          ls -lh NeonStrike3D/build/NeonStrike3D.apk
+
+      - name: Upload downloadable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NeonStrike3D-Android-APK
+          path: NeonStrike3D/build/NeonStrike3D.apk
+          retention-days: 30
+          if-no-files-found: error
