@@ -220,7 +220,7 @@ func _create_river() -> void:
     stream.mesh = st.commit()
     add_child(stream)
 
-func _spawn_multimesh(label: String, mesh: Mesh, material: Material, transforms: Array[Transform3D]) -> void:
+func _spawn_multimesh(label: String, mesh: Mesh, material: Material, transforms: Array) -> void:
     if transforms.is_empty():
         return
     mesh.surface_set_material(0, material)
