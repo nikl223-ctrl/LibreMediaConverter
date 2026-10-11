@@ -3,6 +3,7 @@ extends Node3D
 ## Fast low-poly geometry and the Compatibility renderer target mid/high-end Android phones.
 
 const HUD_SCRIPT = preload("res://scripts/hud.gd")
+const OUTDOOR_SCRIPT = preload("res://scripts/outdoor.gd")
 const ARENA_HALF: float = 43.0
 const PLAYER_SPEED: float = 9.0
 const SHOT_INTERVAL: float = 0.115
@@ -46,8 +47,10 @@ var rng := RandomNumberGenerator.new()
 func _ready() -> void:
     rng.randomize()
     _build_materials()
-    _build_atmosphere()
-    _build_arena()
+    var outdoor := OUTDOOR_SCRIPT.new()
+    outdoor.name = "RiverlandsOutdoorWorld"
+    add_child(outdoor)
+    outdoor.generate(self)
     _build_player()
     _build_audio()
     var overlay := CanvasLayer.new()
@@ -225,7 +228,8 @@ func _build_arena() -> void:
 func _build_player() -> void:
     player = CharacterBody3D.new()
     player.name = "Player"
-    player.position = Vector3(0.0, 1.1, 0.0)
+    player.rotation.y = -PI * 0.5
+    player.position = Vector3(-18.0, 1.1, 3.0)
     player.floor_snap_length = 0.28
     add_child(player)
     var collision := CollisionShape3D.new()
@@ -337,8 +341,8 @@ func _reset_game() -> void:
     wave_wait = -1.0
     move_axis = Vector2.ZERO
     trigger_down = false
-    player.position = Vector3(0.0, 1.1, 0.0)
-    player.rotation = Vector3.ZERO
+    player.position = Vector3(-18.0, 1.1, 3.0)
+    player.rotation = Vector3(0.0, -PI * 0.5, 0.0)
     camera.rotation = Vector3.ZERO
     player.velocity = Vector3.ZERO
 
@@ -490,14 +494,16 @@ func _blast(location: Vector3, is_brute: bool) -> void:
 
 func _spawn_enemy() -> void:
     var angle := rng.randf_range(0.0, TAU)
-    var radius := rng.randf_range(21.0, 37.0)
+    var radius := rng.randf_range(19.0, 34.0)
+    var spawn_x := clampf(-18.0 + cos(angle) * radius, -39.0, -12.0)
+    var spawn_z := clampf(3.0 + sin(angle) * radius, -39.0, 39.0)
     var is_brute := wave >= 3 and rng.randf() < minf(0.36, float(wave) * 0.045)
     var unit := CharacterBody3D.new()
     unit.name = "Brute" if is_brute else "Sentinel"
     unit.collision_layer = 2
     unit.collision_mask = 1
     unit.floor_snap_length = 0.35
-    unit.position = Vector3(cos(angle) * radius, 1.24 if is_brute else 1.08, sin(angle) * radius)
+    unit.position = Vector3(spawn_x, 1.24 if is_brute else 1.08, spawn_z)
     add_child(unit)
     var hitbox := CollisionShape3D.new()
     var capsule := CapsuleShape3D.new()
