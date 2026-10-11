@@ -139,7 +139,7 @@ func _draw_rpg() -> void:
     var s := _ui_scale()
     var w := size.x
     var h := size.y
-    var quest := game.rpg
+    var quest = game.rpg
     var gold := Color("#edc66e")
     var cyan := Color("#63dddc")
     var white := Color("#eff0e6")
@@ -158,10 +158,10 @@ func _draw_rpg() -> void:
     draw_arc(map_center, map_radius, 0.0, TAU, 72, Color("#a2c8ac"), 2.2 * s, true)
     # Local 150m radar, looking north. Curving cyan river and destination marker.
     for i in range(33):
-        var z := -75.0 + float(i) * 4.8 + game.player.global_position.z
-        var z_radar := (z - game.player.global_position.z) * 0.85 * s
-        var shore := (5.0 + sin(z * 0.058) * 3.5) - game.player.global_position.x
-        var x_radar := shore * 0.85 * s
+        var z: float = -75.0 + float(i) * 4.8 + game.player.global_position.z
+        var z_radar: float = (z - game.player.global_position.z) * 0.85 * s
+        var shore: float = (5.0 + sin(z * 0.058) * 3.5) - game.player.global_position.x
+        var x_radar: float = shore * 0.85 * s
         var p := map_center + Vector2(x_radar, z_radar)
         if p.distance_to(map_center) < map_radius - 5.0 * s:
             draw_circle(p, 4.4 * s, Color("#6fbdcd"))
@@ -176,7 +176,7 @@ func _draw_rpg() -> void:
         offset = offset.normalized() * (map_radius - 13.0 * s)
     draw_circle(map_center + offset, 9.0 * s, gold)
     draw_circle(map_center, 6.0 * s, cyan)
-    var angle := game.player.rotation.y
+    var angle: float = game.player.rotation.y
     var pointing := Vector2(-sin(angle), -cos(angle))
     draw_line(map_center, map_center + pointing * 19.0 * s, Color.WHITE, 2.4 * s)
     draw_arc(map_center, 21.0 * s, 0, TAU, 28, Color(0.7, 1.0, 0.93, 0.35), 1.0 * s, true)
