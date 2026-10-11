@@ -142,6 +142,7 @@ jobs:
           audio_channels=$(sed -n 's/^AUDIO_CHANNELS=//p' "$request_file" | tail -n 1 | tr -d '\r\n\t ' || true)
           audio_bitrate=$(sed -n 's/^AUDIO_BITRATE=//p' "$request_file" | tail -n 1 | tr -d '\r\n\t ' || true)
           request_max_output_bytes=$(sed -n 's/^MAX_OUTPUT_BYTES=//p' "$request_file" | tail -n 1 | tr -d '\r\n\t ' || true)
+          handbrake_51=$(sed -n 's/^HANDBRAKE_51=//p' "$request_file" | tail -n 1 | tr -d '\r\n\t ' || true)
           spatial_4x=$(sed -n 's/^SPATIAL_4X=//p' "$request_file" | tail -n 1 | tr -d '\r\n\t ' || true)
           [ -n "$spatial_4x" ] || spatial_4x=0
 
@@ -207,6 +208,7 @@ jobs:
           echo "audio_bitrate=$audio_bitrate" >> "$GITHUB_OUTPUT"
           echo "max_output_bytes=$request_max_output_bytes" >> "$GITHUB_OUTPUT"
           echo "spatial_4x=$spatial_4x" >> "$GITHUB_OUTPUT"
+          echo "handbrake_51=$handbrake_51" >> "$GITHUB_OUTPUT"
 
       - name: Probe source and calculate bitrate
         id: probe
@@ -266,11 +268,39 @@ jobs:
           AUDIO_BITRATE: ${{ steps.input.outputs.audio_bitrate }}
           OUTPUT_LIMIT_BYTES: ${{ steps.input.outputs.max_output_bytes }}
           SPATIAL_4X: ${{ steps.input.outputs.spatial_4x }}
+          HANDBRAKE_51: ${{ steps.input.outputs.handbrake_51 }}
         run: |
           set -euo pipefail
 
           dest_path="${DEST_FOLDER%/}/$OUTPUT_NAME"
           rclone mkdir "drive:${DEST_FOLDER%/}" --tpslimit 2 --tpslimit-burst 1 --retries 20 --retries-sleep 30s --low-level-retries 100
+
+          if [ "${HANDBRAKE_51:-0}" = "1" ]; then
+            echo "Starting one HandBrakeCLI 4K worker with AC3 5.1 audio"
+            echo "NOTE: source must contain 5.1+ channels; stereo cannot create genuine surround."
+            ffprobe -v error -select_streams a:0 -show_entries stream=codec_name,channels,channel_layout -of json "$INPUT_FILE"
+            channels=$(ffprobe -v error -select_streams a:0 -show_entries stream=channels -of default=noprint_wrappers=1:nokey=1 "$INPUT_FILE" | head -n1)
+            if [ "${channels:-0}" -lt 6 ]; then
+              echo "::error::Source has fewer than 6 audio channels; refusing to label stereo upmix as real 5.1."
+              exit 1
+            fi
+            hb_file="$RUNNER_TEMP/handbrake-4k-51.mkv"
+            dest_path="${DEST_FOLDER%/}/Ratatouille_4K_HandBrake_AC3_5.1.mkv"
+            # 8 Mbps is chosen to fit GitHub-hosted runner disk; source FPS retained.
+            HandBrakeCLI -i "$INPUT_FILE" -o "$hb_file" -f av_mkv \
+              -e x264 --encoder-preset ultrafast -b 8000 \
+              -w 3840 -l 2160 --keep-display-aspect \
+              -a 1 -E ac3 -6 5point1 -B 640 -R 48 \
+              --markers 2>&1 | tee "$RUNNER_TEMP/handbrake-progress.log"
+            test -s "$hb_file"
+            rclone copyto "$hb_file" "drive:$dest_path" --stats 10s --retries 8 --low-level-retries 20
+            final_size=$(rclone size --json "drive:$dest_path" | jq -r '.bytes // 0')
+            test "$final_size" -gt 0
+            test "$final_size" -le "$OUTPUT_LIMIT_BYTES"
+            echo "dest_path=$dest_path" >> "$GITHUB_OUTPUT"
+            echo "final_size=$final_size" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           bitrate="$VIDEO_BPS"
           maxrate=$(( bitrate * 12 / 10 ))
