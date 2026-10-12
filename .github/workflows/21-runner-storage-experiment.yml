@@ -24,7 +24,9 @@ jobs:
         run: |
           mkdir -p shard
           dd if=/dev/urandom of=shard/node-${{ matrix.node }}.bin bs=1M count=32 status=none
-          sha256sum shard/* > shard/checksum.txt
+          cd shard
+          sha256sum node-${{ matrix.node }}.bin > checksum.txt
+          cd ..
       - name: Export shard to shared GitHub artifact storage
         uses: actions/upload-artifact@v4
         with:
