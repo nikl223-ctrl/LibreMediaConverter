@@ -37,6 +37,22 @@ func _test() -> void:
         quit(1)
         return
     print("DRIVING_SPEED_TEST_PASS actual_kmh=", game.speed*3.6)
+    # In a personal private build, prove that the source PC game materials
+    # and *real* WAVs were loaded, not just copied into the APK.
+    if ResourceLoader.exists("res://original_assets/siren.wav"):
+        if game.city.original_texture_count < 2:
+            push_error("Private graphics build: PC textures are present but renderer is ignoring them")
+            quit(1)
+            return
+        if game.siren_player.stream.resource_path.find("original_assets/siren.wav") < 0:
+            push_error("Private audio build: original siren exists but synthetic fallback is playing")
+            quit(1)
+            return
+        if game.engine_player.stream.resource_path.find("original_assets/engine_normal.wav") < 0:
+            push_error("Private audio build: original motor recording exists but synthetic fallback is playing")
+            quit(1)
+            return
+        print("ORIGINAL_PC_ASSETS_LOADED_PASS DDS texture materials=",game.city.original_texture_count, " actual FMOD-exported siren and engine loaded")
     game.toggle_lights()
     game.toggle_siren()
     if not game.lights_on or not game.siren_on:
