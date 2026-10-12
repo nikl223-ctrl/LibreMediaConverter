@@ -26,6 +26,17 @@ func _test() -> void:
         push_error("Cannot start RTW dispatch")
         quit(1)
         return
+    # Verify that floor contacts do NOT count as crashes anymore. This was
+    # the cause of the previous version's severe speed limitation.
+    game.gas_input = 1.0
+    for frame in range(150):
+        await physics_frame
+    game.gas_input = 0.0
+    if game.speed < 18.0:
+        push_error("Drive physics regression: full-throttle ambulance could not accelerate above 65 km/h")
+        quit(1)
+        return
+    print("DRIVING_SPEED_TEST_PASS actual_kmh=", game.speed*3.6)
     game.toggle_lights()
     game.toggle_siren()
     if not game.lights_on or not game.siren_on:
