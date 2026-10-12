@@ -2,6 +2,45 @@
 
 **Android-Spielprojekt** inspiriert vom PC-Titel „Rettungswagen-Simulator 2012“ (2011, Z-Software / astragon). Mit Godot 4.5.2 und ARM64-APK über GitHub Actions. Das ist **kein offizieller Port und keine 1:1-Version**.
 
+## Wichtig: Originalgrafik und Originalsound (neuer privater Build)
+
+Der erste öffentliche Android-Prototyp enthält **nicht** die Original-3D-Modelle, die Originaltextures oder die FMOD-Aufnahmen. **Die Dateien sind nicht beim APK-Export verschwunden – sie waren schlicht nie in diesem Build enthalten.**
+
+Die Windows-Prüfung des user-provided `city.v` ist jetzt gelungen:
+
+| Originaldatei | Auslesen / Konvertieren | Ergebnis |
+|---|---|---|
+| `textures/vehicles/RTW/aussen_1.dds` | DDS nach WebP | Erfolg, 1024 × 1024 |
+| `textures/vehicles/RTW/cockpit_1.dds` | DDS nach WebP | Erfolg, 2048 × 2048 |
+| `textures/buildings/city_hr1_var01_diff.dds` | DDS nach WebP | Erfolg, 2048 × 2048 |
+| `textures/buildings/Gehwege.dds` | DDS nach WebP | Erfolg, 1024 × 1024 |
+| `Spielerfahrzeug_Sirene_Loop_V` | FSB4 nach WAV | Erfolg, 8,78 Sekunden Stereo |
+| `RTW_NEU_Leerlauf_01` | FSB4 nach WAV | Erfolg |
+| `RTW_NEU_Langsam_01` | FSB4 nach WAV | Erfolg |
+| `RTW_NEU_Hoch_04` | FSB4 nach WAV | Erfolg |
+| `models/vehicle/RTW/chassis.Model` | Vision VBIN/HSMV → GLB | **Noch nicht konvertiert** |
+| `models/vehicle/RTW/cockpit.Model` | Vision VBIN/HSMV → GLB | **Noch nicht konvertiert** |
+
+Ein **fertiger GitHub-Actions-Workflow** ist im Repository enthalten:
+
+[PRIVATE Rettungswagen – Originalsound/Originaltexturen zu Android](https://github.com/nikl223-ctrl/LibreMediaConverter/blob/ambulance-2012-android/.github/workflows/ambulance-private-assets.yml)
+
+Der Workflow ist in diesem **öffentlichen** Repository aus gutem Grund deaktiviert (`github.event.repository.private == true`). Für eine nur persönlich nutzbare APK mit den Originalaufnahmen:
+
+1. Ein **neues, leeres, privates** GitHub-Repository unter https://github.com/new anlegen, zum Beispiel `Rettungsdienst-2012-Android`. Nicht den bestehenden Media Converter umbauen.
+2. Den Quellcode aus dem Branch `ambulance-2012-android` in das private Repository kopieren, inklusive `.github/workflows/ambulance-private-assets.yml`.
+3. Dem neuen Repo in GitHub Actions die **eigenen** Secrets `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` und `GOOGLE_REFRESH_TOKEN` hinzufügen, ohne die Werte zu veröffentlichen. Der Client muss zum privaten OAuth-Projekt `160241343420` gehören.
+4. Auf dem privaten GitHub-Repository den Workflow starten. Worker 1 lädt das nur für den Build benötigte Originalarchiv, importiert die WAVs/WebPs und überträgt sie als **privates** Build-Artefakt an Worker 2. Worker 2 prüft die Originaldateien und baut eine neue APK.
+5. Im Spiel zeigt der Startbildschirm an, ob Originalton/Texturen tatsächlich installiert sind. Auch in diesem privaten Build wären die echten **3D-Fahrzeug- und Gebäudemodelle** vorerst noch nicht enthalten; dafür brauchen wir zusätzlich einen getesteten VBIN/HSMV-Konverter, einschließlich originalgetreuer UVs, Skalierung, Materialien und Platzierung.
+
+**Bitte eine private Build-APK nicht als 1:1-Port weiterverbreiten.** Du müsstest die entsprechenden Rechte für Originalgrafiken und Originalaufnahmen haben. Der Import-Prozess ist für eine eigene, persönliche Kopie vorbereitet; wir haben bislang nur die Funktion des Audio-/Texturkonverters im kurzlebigen Windows-Analyseworker geprüft, nicht den kompletten privaten Android-Build.
+
+## Geschwindigkeit und technische Diagnose
+
+Die alte Fahrzeugphysik reduzierte Geschwindigkeit bereits bei Bodenkontakt. Dieser Fehler wurde behoben. Der GitHub-Test hat mit Vollgas einen RTW-Wert von etwa **120,6 km/h** gemessen. Zivilverkehr wurde auf programmierte **36 bis 68 km/h** gesetzt. Das HUD zeigt nun neben dem Tacho auch die **tatsächliche Bildrate**, um niedrige Smartphone-FPS von einem Fahrphysikproblem zu unterscheiden.
+
+---
+
 ## APK per GitHub herunterladen
 
 [GitHub Actions: Rettungsdienst Simulator – Android APK](https://github.com/nikl223-ctrl/LibreMediaConverter/actions/workflows/ambulance-android-apk.yml)
