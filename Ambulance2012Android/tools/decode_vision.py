@@ -132,7 +132,7 @@ def main():
                     "header_ascii":"".join(chr(b) if 32<=b<=126 else "." for b in header[:64]),
                     "size":z.getinfo(bank).file_size,
                     "likely_sfx_label_words":[word.decode("latin1") for word in
-                        re.findall(rb"[A-Za-z0-9_()\\- ]{4,70}",header_2m)
+                        re.findall(rb"[-A-Za-z0-9_() ]{4,70}",header_2m)
                         if any(phrase in word.lower() for phrase in
                             [b"horn",b"siren",b"motor",b"engine",b"standgas",b"diesel",b"rtw",b"drive",b"alarm",b"signal"] )][:35]
                 }
