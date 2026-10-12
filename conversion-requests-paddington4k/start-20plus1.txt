@@ -1,0 +1,4 @@
+Paddington 2
+4K H264 80 Mbit/s ultrafast
+20 encoder storage workers + 1 final assembler
+Final output only uploaded to Google Drive after all 20 encoded shards exist.
