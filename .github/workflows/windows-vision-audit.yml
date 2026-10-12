@@ -1,0 +1,43 @@
+name: Windows Vision Engine - Android Port Feasibility Audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - windows-vision-android-audit
+    paths:
+      - ".github/workflows/windows-vision-audit.yml"
+      - "port-audit/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vision-win-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-vision-inspection:
+    name: Windows Worker - Inspect Google Drive Game Data
+    runs-on: windows-2022
+    timeout-minutes: 40
+    env:
+      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+    steps:
+      - name: Checkout standalone audit branch
+        uses: actions/checkout@v4
+
+      - name: Inspect (NEVER execute) Windows game EXE, DLL, plugin and city.v
+        shell: pwsh
+        run: ./port-audit/inspect.ps1
+
+      - name: Publish technical report only (no copyrighted binaries)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows-Vision-Android-Port-Audit
+          path: port-audit/report/windows-vision-audit.json
+          if-no-files-found: warn
+          retention-days: 14
