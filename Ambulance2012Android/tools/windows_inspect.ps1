@@ -80,6 +80,8 @@ function Add-FileResult([hashtable]$entry) {
     if($entry.name -eq 'data/city.v') {
       python Ambulance2012Android/tools/inspect_city.py --input $target --out (Join-Path $reportDir 'city-archive-analysis.json')
       if($LASTEXITCODE -ne 0) { Write-Warning 'Archive analysis could not complete; base metadata is still collected' }
+      python Ambulance2012Android/tools/decode_vision.py --input $target --out (Join-Path $reportDir 'city-zip-inventory.json')
+      if($LASTEXITCODE -ne 0) { Write-Warning 'XOR archive decoding or ZIP inventory could not complete' }
     }
     $matched = $size -eq $entry.expectedBytes
     if(-not $matched) { $script:failed++; Write-Warning ('Size mismatch: ' + $entry.name) }
