@@ -35,6 +35,7 @@ var lights_on: bool = false
 var siren_on: bool = false
 var siren_player: AudioStreamPlayer
 var engine_player: AudioStreamPlayer
+var idle_engine_player: AudioStreamPlayer
 var flash_clock: float = 0.0
 var message: String = ""
 var message_time: float = 0.0
@@ -176,25 +177,34 @@ func _build_marker() -> void:
     marker_light.shadow_enabled = false
     marker.add_child(marker_light)
 
+func _load_loop_or_fallback(sound_path: String, fallback: AudioStreamWAV) -> AudioStream:
+    if ResourceLoader.exists(sound_path):
+        var recording: AudioStream = load(sound_path)
+        if recording is AudioStreamWAV:
+            var wav: AudioStreamWAV = recording as AudioStreamWAV
+            wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
+        return recording
+    return fallback
+
 func _build_audio() -> void:
     siren_player = AudioStreamPlayer.new()
     siren_player.name = "EmergencySiren"
-    siren_player.volume_db = -10
-    var original_siren := "res://original_assets/siren.ogg"
-    if ResourceLoader.exists(original_siren):
-        siren_player.stream = load(original_siren)
-    else:
-        siren_player.stream = _make_tone(true)
+    siren_player.volume_db = -10.0
+    siren_player.stream = _load_loop_or_fallback("res://original_assets/siren.wav", _make_tone(true))
     add_child(siren_player)
     engine_player = AudioStreamPlayer.new()
-    engine_player.name = "DieselEngine"
-    engine_player.volume_db = -20
-    var original_engine := "res://original_assets/engine.ogg"
-    if ResourceLoader.exists(original_engine):
-        engine_player.stream = load(original_engine)
-    else:
-        engine_player.stream = _make_tone(false)
+    engine_player.name = "DieselEngineRunning"
+    engine_player.volume_db = -20.0
+    engine_player.stream = _load_loop_or_fallback("res://original_assets/engine_normal.wav", _make_tone(false))
     add_child(engine_player)
+    idle_engine_player = AudioStreamPlayer.new()
+    idle_engine_player.name = "DieselEngineIdle"
+    idle_engine_player.volume_db = -15.0
+    if ResourceLoader.exists("res://original_assets/engine_idle.wav"):
+        idle_engine_player.stream = _load_loop_or_fallback("res://original_assets/engine_idle.wav", _make_tone(false))
+        add_child(idle_engine_player)
+    else:
+        idle_engine_player.stream = null
 
 func _make_tone(emergency: bool) -> AudioStreamWAV:
     # Better fallback when private source recordings aren't supplied:
@@ -279,6 +289,8 @@ func start_simulation(unit: int = 0) -> void:
     mission_stage = 0
     _choose_mission()
     engine_player.play()
+    if idle_engine_player.stream != null:
+        idle_engine_player.play()
 
 func _load_progress() -> void:
     if not FileAccess.file_exists(SAVE_PATH):
@@ -406,7 +418,11 @@ func _process(delta: float) -> void:
     message_time = maxf(0.0,message_time-delta)
     if siren_on and not siren_player.playing:
         siren_player.play()
-    engine_player.pitch_scale = clampf(0.77+absf(speed)*0.018,0.72,1.55)
+    engine_player.pitch_scale = clampf(0.82+absf(speed)*0.018,0.78,1.49)
+    if idle_engine_player.stream != null:
+        var speed_ratio: float = clampf(absf(speed)/20.0,0.0,1.0)
+        idle_engine_player.volume_db = lerpf(-12.0,-38.0,speed_ratio)
+        engine_player.volume_db = lerpf(-31.0,-15.0,speed_ratio)
     _tick_lightbar()
     _position_camera(delta)
     if marker.visible:
