@@ -1,0 +1,39 @@
+name: Ambulance 2012 - Windows Asset Inspection
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ambulance-2012-android]
+    paths:
+      - "Ambulance2012Android/tools/**"
+      - ".github/workflows/ambulance-windows-inspect.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ambulance-windows-scan-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  original-assets:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    name: Windows Worker - inspect 2012 rescue simulator assets
+    env:
+      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect game install without executing EXEs
+        shell: pwsh
+        run: ./Ambulance2012Android/tools/windows_inspect.ps1
+      - name: Upload format report (no original game files)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ambulance2012-Windows-Asset-Report
+          path: Ambulance2012Android/port-audit/report/*.json
+          retention-days: 30
+          if-no-files-found: warn
