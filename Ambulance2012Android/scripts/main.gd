@@ -338,8 +338,8 @@ func toggle_reverse() -> void:
 func _physics_process(delta: float) -> void:
     if state != "playing":
         return
-    var acceleration: float = 9.3
-    var max_speed: float = 29.0 if vehicle_type == 1 else (25.0 if vehicle_type == 0 else 22.0)
+    var acceleration: float = 14.2
+    var max_speed: float = 36.0 if vehicle_type == 1 else (33.5 if vehicle_type == 0 else 30.5)
     var kb_gas: float = 1.0 if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP) else 0.0
     var kb_brake: float = 1.0 if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN) else 0.0
     var kb_steer: float = (1.0 if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT) else 0.0) - (1.0 if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT) else 0.0)
@@ -365,8 +365,13 @@ func _physics_process(delta: float) -> void:
     player.velocity = front*speed
     player.velocity.y = -0.7 if player.is_on_floor() else player.velocity.y - 15.0*delta
     player.move_and_slide()
-    if player.get_slide_collision_count()>0:
-        speed *= 0.86
+    # Critical: the previous implementation damped speed on EVERY floor contact,
+    # making the ambulance crawl. Only slow down for a horizontal obstacle.
+    for i in range(player.get_slide_collision_count()):
+        var collision: KinematicCollision3D = player.get_slide_collision(i)
+        if absf(collision.get_normal().y) < 0.55:
+            speed *= 0.48
+            break
     city.advance_traffic(delta,player)
     _tick_mission(delta)
 
