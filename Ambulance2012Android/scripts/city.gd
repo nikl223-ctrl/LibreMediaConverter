@@ -19,6 +19,8 @@ var landmark_material: StandardMaterial3D
 var traffic_time: float = 0.0
 var traffic_count: int = 24
 var world_root: Node3D
+var original_texture_count: int = 0
+var original_vehicle_model_loaded: bool = false
 
 func initialize() -> void:
     rng.seed = 2012
@@ -41,6 +43,12 @@ func _material(color: Color, rough: float = 0.86) -> StandardMaterial3D:
 func _create_materials() -> void:
     asphalt = _material(Color("#414449"), 0.98)
     sidewalk = _material(Color("#979d99"))
+    # These are imported ONLY in the privately built Android game. The publicly
+    # built test APK does not ship proprietary third-party material artwork.
+    if ResourceLoader.exists("res://original_assets/sidewalk.webp"):
+        sidewalk.albedo_texture = load("res://original_assets/sidewalk.webp")
+        sidewalk.uv1_scale = Vector3(2.0, 2.0, 2.0)
+        original_texture_count += 1
     grass = _material(Color("#4f8152"))
     white = _material(Color("#d4d4c7"))
     yellow = _material(Color("#ddbd54"))
@@ -56,6 +64,8 @@ func _create_materials() -> void:
 shader_type spatial;
 render_mode cull_back, diffuse_burley;
 uniform vec4 wall_color : source_color = vec4(0.66,0.66,0.66,1.0);
+uniform bool imported_texture_enabled = false;
+uniform sampler2D imported_tex : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 varying vec2 building_uv;
 void vertex() {
     building_uv = UV;
@@ -70,14 +80,27 @@ void fragment() {
     vec3 glass = mix(vec3(0.13,0.19,0.23),vec3(0.56,0.54,0.38),lit);
     float horizontal = step(0.967,fract(building_uv.y*14.0));
     vec3 brick = wall_color.rgb * (0.94+0.08*fract(sin(dot(id,vec2(3.1,7.4)))*8943.1));
-    ALBEDO = mix(brick,glass,frame);
-    ALBEDO *= 1.0 - horizontal*0.18;
-    ROUGHNESS = mix(0.81,0.34,frame);
-    EMISSION = glass * frame * lit * 0.14;
+    if (imported_texture_enabled) {
+        // Uses actual DDS-derived PC-game diffuse art when installed.
+        // Geometry and UV atlas are NOT identical to the original Vision mesh.
+        ALBEDO = texture(imported_tex,building_uv * vec2(2.0,3.0)).rgb;
+        ROUGHNESS = 0.88;
+        EMISSION = vec3(0.0);
+    } else {
+        ALBEDO = mix(brick,glass,frame);
+        ALBEDO *= 1.0 - horizontal*0.18;
+        ROUGHNESS = mix(0.81,0.34,frame);
+        EMISSION = glass * frame * lit * 0.14;
+    }
 }
 """
         material.shader = shader
         material.set_shader_parameter("wall_color", color)
+        var original_path: String = "res://original_assets/city_highrise.webp" if wall_materials.size() >= 3 else ("res://original_assets/brick_wall2.webp" if wall_materials.size() % 2 == 0 else "res://original_assets/brick_wall.webp")
+        if ResourceLoader.exists(original_path):
+            material.set_shader_parameter("imported_tex", load(original_path))
+            material.set_shader_parameter("imported_texture_enabled", true)
+            original_texture_count += 1
         wall_materials.append(material)
 
 func _build_lighting() -> void:
@@ -333,6 +356,16 @@ func _instance_geometry(label: String, mesh: Mesh, mat: Material, transforms: Ar
 func _create_car_model(parent: Node3D, color: Color, ambulance: bool) -> Node3D:
     var root := Node3D.new()
     parent.add_child(root)
+    if ambulance:
+        var optional_model: String = "res://original_assets/rtw.glb"
+        if ResourceLoader.exists(optional_model):
+            var source: PackedScene = load(optional_model)
+            if source != null:
+                var original_model: Node3D = source.instantiate() as Node3D
+                if original_model != null:
+                    root.add_child(original_model)
+                    original_vehicle_model_loaded = true
+                    return root
     var body := _material(color,0.45)
     var window_mat := _material(Color("#335764"),0.22)
     var tire := _material(Color("#202328"),0.97)
