@@ -208,7 +208,7 @@ func _make_tone(emergency: bool) -> AudioStreamWAV:
     var secondary_phase: float = 0.0
     for i in range(count):
         var t: float = float(i) / float(rate)
-        var signal: float = 0.0
+        var sample_signal: float = 0.0
         if emergency:
             var phase_beat: float = fmod(t, 1.20)
             var high_tone: bool = phase_beat >= 0.6
@@ -217,15 +217,15 @@ func _make_tone(emergency: bool) -> AudioStreamWAV:
             phase += TAU * frequency / float(rate)
             secondary_phase += TAU * (frequency * 1.51) / float(rate)
             var edge: float = minf(1.0, minf(fmod(phase_beat, 0.6) * 22.0, (0.6 - fmod(phase_beat, 0.6)) * 25.0))
-            signal = (sin(phase) * 0.53 + sin(phase * 2.0) * 0.21 + sin(secondary_phase) * 0.11) * edge
+            sample_signal = (sin(phase) * 0.53 + sin(phase * 2.0) * 0.21 + sin(secondary_phase) * 0.11) * edge
         else:
             var low_hz: float = 65.0 + sin(t * 9.0) * 2.0
             phase += TAU * low_hz / float(rate)
             secondary_phase += TAU * (low_hz * 2.0) / float(rate)
             var engine_pulse: float = maxf(0.0, sin(phase))
-            signal = sin(phase) * 0.25 + sin(secondary_phase) * 0.18 + pow(engine_pulse, 6.0) * 0.35
-            signal += sin(phase * 0.23 + sin(t * 61.0)) * 0.05
-        var value: int = int(clampf(signal * 20000.0, -31000.0, 31000.0))
+            sample_signal = sin(phase) * 0.25 + sin(secondary_phase) * 0.18 + pow(engine_pulse, 6.0) * 0.35
+            sample_signal += sin(phase * 0.23 + sin(t * 61.0)) * 0.05
+        var value: int = int(clampf(sample_signal * 20000.0, -31000.0, 31000.0))
         if value < 0:
             value += 65536
         pcm[2 * i] = value & 255
