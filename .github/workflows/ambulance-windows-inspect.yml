@@ -26,6 +26,17 @@ jobs:
       GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+      - name: Install image and original audio inspection tools
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade Pillow
+          $url = 'https://github.com/vgmstream/vgmstream/releases/download/r2117/vgmstream-win64.zip'
+          Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP/vgmstream.zip" -TimeoutSec 180
+          Expand-Archive -LiteralPath "$env:RUNNER_TEMP/vgmstream.zip" -DestinationPath "$env:RUNNER_TEMP/vgmstream" -Force
+          $cli = Get-ChildItem -Path "$env:RUNNER_TEMP/vgmstream" -Filter 'vgmstream-cli.exe' -Recurse | Select-Object -First 1
+          if ($null -eq $cli) { throw 'vgmstream-cli missing' }
+          "VGMSTREAM_CLI=$($cli.FullName)" >> $env:GITHUB_ENV
+          Write-Host 'Original DDS and FMOD media audit tools ready'
       - name: Inspect game install without executing EXEs
         shell: pwsh
         run: ./Ambulance2012Android/tools/windows_inspect.ps1
