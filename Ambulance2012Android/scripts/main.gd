@@ -4,6 +4,8 @@ extends Node3D
 const CITY_SCRIPT = preload("res://scripts/city.gd")
 const HUD_SCRIPT = preload("res://scripts/hud.gd")
 const SAVE_PATH: String = "user://ambulance_progress.json"
+const ORIGINAL_RTW_STEERING_DEGREES: float = 46.0
+const MOBILE_WHEELBASE: float = 3.7
 
 var state: String = "menu"
 var city
@@ -352,8 +354,13 @@ func _physics_process(delta: float) -> void:
         speed = move_toward(speed,0.0,23.0*brake*delta)
     var steering: float = clampf(steer_axis+kb_steer,-1.0,1.0)
     if absf(speed)>0.12:
-        var speed_fraction: float = minf(absf(speed)/12.0,1.0)
-        player.rotation.y += -steering*(0.15+speed_fraction*0.85)*1.45*signf(speed)*delta
+        # Bicycle steering: initial 46-degree limit comes from the original
+        # user-provided vehicles/rtw.xvd; platform units are reinterpreted.
+        var max_angle: float = deg_to_rad(ORIGINAL_RTW_STEERING_DEGREES)
+        var steer_fade: float = 1.0 + absf(speed)*0.105
+        var wheel_angle: float = steering*max_angle/steer_fade
+        var yaw_rate: float = speed*tan(wheel_angle)/MOBILE_WHEELBASE
+        player.rotation.y -= yaw_rate*delta
     var front: Vector3 = -player.global_transform.basis.z
     player.velocity = front*speed
     player.velocity.y = -0.7 if player.is_on_floor() else player.velocity.y - 15.0*delta
