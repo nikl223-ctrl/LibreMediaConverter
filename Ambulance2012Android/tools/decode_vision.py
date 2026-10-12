@@ -98,6 +98,27 @@ def main():
                         stats["parsed_as_xml"]=False
                         stats["parse_error_type"]=type(e).__name__
                 results["scene_metadata"][candidate]=stats
+            results["model_headers"]={}
+            sample_files=[
+                "models/vehicle/RTW/chassis.Model",
+                "models/vehicle/RTW/cockpit.Model",
+                "models/vehicle/KTW/chassis.Model",
+                "models/houses/high_rise/city_hr3_varA.VMESH",
+                "models/houses/high_rise/city_hr3_varA.VMESH_DATA",
+            ]
+            for name in sample_files:
+                if name not in z.namelist():
+                    continue
+                with z.open(name) as content:
+                    header=content.read(512)
+                readable_strings=[chunk.decode("latin-1") for chunk in
+                    re.findall(rb"[A-Za-z0-9_.:/\\ -]{5,110}",header)][:18]
+                results["model_headers"][name]={
+                    "size_bytes":z.getinfo(name).file_size,
+                    "header_hex":header[:128].hex(" "),
+                    "readable_strings":readable_strings
+                }
+            print("VISION_MODEL_HEADERS=",json.dumps(results["model_headers"])[:6000],flush=True)
             results["vehicle_physics_summary"]={}
             for vehicle_id in ("rtw","ktw","rtw-2","k1","k2"):
                 path=f"vehicles/{vehicle_id}.xvd"
