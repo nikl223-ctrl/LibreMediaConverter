@@ -57,13 +57,17 @@ func _draw() -> void:
             _panel(box,cyan if i==0 else pale)
             _center(["RTW","NEF","KTW"][i],box.get_center().x,box.position.y+38.0*s,int(30.0*s),white)
             _center(["RETTUNG","NOTARZT","TRANSPORT"][i],box.get_center().x,box.position.y+74.0*s,int(16.0*s),gold)
-        _center("ANDROID-NEUENTWICKLUNG  /  ALLE SOUNDS UND MODELLE NEU ERSTELLT",w*0.5,h*0.78,int(15*s),pale)
+        var original_installed: bool = game.city.original_texture_count > 0 and ResourceLoader.exists("res://original_assets/siren.wav")
+        var edition_label: String = "ORIGINAL-PC-AUDIO UND TEXTUREN AKTIV  /  3D-MODELLE NOCH PROTOTYP" if original_installed else "TESTVERSION MIT NEUEN MODELLEN  /  ORIGINALTEXTUREN UND -TON NICHT ENTHALTEN"
+        _center(edition_label,w*0.5,h*0.78,int(15*s),gold if original_installed else pale)
         return
 
     _panel(Rect2(Vector2(23*s,21*s),Vector2(513*s,112*s)),cyan)
     _print("RETTUNGSDIENST / LEITSTELLE 112",Vector2(40*s,56*s),int(21*s),cyan)
     _print("KARRIERE STUFE %d  |  %d EUR  |  %d EINSATZE" % [game.career_rank,game.credits,game.completed],Vector2(40*s,87*s),int(18*s),white)
     _print(game.unit_labels[game.vehicle_type],Vector2(40*s,115*s),int(17*s),pale)
+    if game.city.original_texture_count > 0 and ResourceLoader.exists("res://original_assets/siren.wav"):
+        _print("ORIGINAL PC AUDIO + %d MATERIALIEN" % game.city.original_texture_count,Vector2(44*s,142*s),int(13*s),gold)
 
     _panel(Rect2(Vector2(23*s,149*s),Vector2(630*s,99*s)),gold)
     _print(game.mission_title(),Vector2(39*s,184*s),int(19*s),gold)
