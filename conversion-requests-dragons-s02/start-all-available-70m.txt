@@ -1,0 +1,6 @@
+Dragons - Die Waechter von Berk S02
+Encode all 18 currently available episodes in episode order.
+4K 3840x2160 H264 ultrafast, 70 Mbps video, maxrate 84 Mbps.
+Missing E11 and E15 are intentionally skipped.
+Merge to one MP4, maximum 256000000000 bytes.
+Workflow may report success only after final Google Drive upload and size verification.
