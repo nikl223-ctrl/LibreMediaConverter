@@ -1,0 +1,177 @@
+name: Dragons Season 1 4K 20+1 Complete Upload
+on:
+  push:
+    branches: [main]
+    paths: ["conversion-requests-dragons/*.txt"]
+permissions:
+  contents: read
+jobs:
+  episode:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        include:
+          - {episode: "01", file_id: "1T4KYMuqXFf8S5zsWGJIrP1vLN7qHOVZ1"}
+          - {episode: "02", file_id: "1Y5R7uSAT8ZOf2RiB6upFDzBtDPf9VTnY"}
+          - {episode: "03", file_id: "12XJNEGQKTXkBxvRtGovQ-x_RQYZaPoH9"}
+          - {episode: "04", file_id: "1of-KIi4Tm9jUwhIF2GBcsUkqlDP9o3TJ"}
+          - {episode: "05", file_id: "1aaA8zZFtGecOQPA0ewlFo3mdPE3sPj0K"}
+          - {episode: "06", file_id: "12dEwWgYCc7Me4g7lM1ucK9mkffFPzMyL"}
+          - {episode: "07", file_id: "1pthc0SXcgKhzwSj7erWrEj3clw6-1WRi"}
+          - {episode: "08", file_id: "1LmYp5wRoGTe3JgJZRWUFzb1OdAPFxIcw"}
+          - {episode: "09", file_id: "16ajy3KBY9V52tHNzvebZquin3L686Fkk"}
+          - {episode: "10", file_id: "1KpMi0xPvjvzJWzsBmMQkdOEBlKffw0mK"}
+          - {episode: "11", file_id: "171pIBC7BiHT5Yjxn3113MStlL83luIrG"}
+          - {episode: "12", file_id: "17OUVIffpI_FUn8fzTaBUxUFCFmqGVDDb"}
+          - {episode: "13", file_id: "1LTGKCN9wIIxxz-yGsUI5xGcjYIzv5Gd5"}
+          - {episode: "14", file_id: "1qngsGm7UAAWyPpmbT88kC92SESsZxIDl"}
+          - {episode: "15", file_id: "1xdWg4jUU8ERLj9vCVCf67qCbRg0m7CFf"}
+          - {episode: "16", file_id: "1yEKxwombuuwKGEFZX-XPjph4lBt-4xev"}
+          - {episode: "17", file_id: "15MBzJF0EMqN5bofkaZA8hwC1lNGxjB0W"}
+          - {episode: "18", file_id: "1P69z9lU0myTPg-sKSzsgT8YdEqyiOdZV"}
+          - {episode: "19", file_id: "1xreTwz2lCxxQRLnwim7nsMa6TXiWVibf"}
+          - {episode: "20", file_id: "18CA9iLhY11udp0PP5QT1Cf9hYlPkI9Ud"}
+    env:
+      RCLONE_CONFIG: /tmp/rclone.conf
+      PARTS: "Video Converter/Fertig/.dragons-s01-4k-${{ github.run_id }}"
+    steps:
+      - name: Install tools
+        run: |
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          for attempt in 1 2 3; do
+            if timeout 300s sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update -qq; then break; fi
+            test "$attempt" -lt 3 || exit 1
+            sleep 10
+          done
+          timeout 300s sudo apt-get install -y --no-install-recommends ffmpeg jq curl ca-certificates
+          curl -fsSL --max-time 60 https://rclone.org/install.sh | timeout 180s sudo bash
+
+      - name: Private Google Drive OAuth
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+          test "${GOOGLE_CLIENT_ID%%-*}" = "160241343420"
+          test -n "$GOOGLE_CLIENT_SECRET"
+          test -n "$GOOGLE_REFRESH_TOKEN"
+          response=$(curl -fsS --retry 3 -X POST --data-urlencode "client_id=$GOOGLE_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_REFRESH_TOKEN" --data-urlencode "grant_type=refresh_token" https://oauth2.googleapis.com/token)
+          access=$(jq -r '.access_token // empty' <<<"$response")
+          test -n "$access"
+          echo "::add-mask::$access"
+          expiry=$(date -u -d '+3500 seconds' '+%Y-%m-%dT%H:%M:%SZ')
+          token=$(jq -cn --arg a "$access" --arg r "$GOOGLE_REFRESH_TOKEN" --arg e "$expiry" '{access_token:$a,token_type:"Bearer",refresh_token:$r,expiry:$e}')
+          rclone config create drive drive client_id "$GOOGLE_CLIENT_ID" client_secret "$GOOGLE_CLIENT_SECRET" scope drive token "$token" --non-interactive >/dev/null
+
+      - name: Download episode
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/source"
+          rclone backend copyid drive: "${{ matrix.file_id }}" "$RUNNER_TEMP/source/" --stats 15s --retries 8
+          find "$RUNNER_TEMP/source" -maxdepth 1 -type f -size +0c | grep -q .
+      - name: Encode 4K H264 and stream episode to Drive
+        run: |
+          set -euo pipefail
+          input=$(find "$RUNNER_TEMP/source" -maxdepth 1 -type f | head -1)
+          dest="$PARTS/episode_${{ matrix.episode }}.mkv"
+          rclone mkdir "drive:$PARTS"
+          set +e
+          ffmpeg -hide_banner -stats_period 10 -i "$input" -map 0:v:0 -map '0:a:0?' \
+            -vf 'scale=3840:2160:force_original_aspect_ratio=decrease,pad=3840:2160:(ow-iw)/2:(oh-ih)/2,setsar=1' \
+            -c:v libx264 -preset ultrafast -pix_fmt yuv420p -b:v 14000k -maxrate 17000k -bufsize 28000k \
+            -c:a aac -ac 2 -b:a 256k -ar 48000 -f matroska pipe:1 \
+            | rclone rcat "drive:$dest" --drive-chunk-size 128M --stats 15s --retries 8 --low-level-retries 30
+          rc=( "${PIPESTATUS[@]}" )
+          set -e
+          test "${rc[0]}" -eq 0 && test "${rc[1]}" -eq 0
+          size=$(rclone size --json "drive:$dest" | jq -r '.bytes // 0')
+          test "$size" -gt 1000000
+          echo "Episode ${{ matrix.episode }} uploaded: $size bytes" >> "$GITHUB_STEP_SUMMARY"
+  merge:
+    needs: episode
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      RCLONE_CONFIG: /tmp/rclone.conf
+      PARTS: "Video Converter/Fertig/.dragons-s01-4k-${{ github.run_id }}"
+      OUTPUT: "Video Converter/Fertig/Dragons_Die_Reiter_von_Berk_S01_E01-E20_4K_H264.mp4"
+      MAX_BYTES: "256000000000"
+    steps:
+      - name: Install tools
+        run: |
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          for attempt in 1 2 3; do
+            if timeout 300s sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update -qq; then break; fi
+            test "$attempt" -lt 3 || exit 1
+            sleep 10
+          done
+          timeout 300s sudo apt-get install -y --no-install-recommends ffmpeg jq curl ca-certificates
+          curl -fsSL --max-time 60 https://rclone.org/install.sh | timeout 180s sudo bash
+
+      - name: Private Google Drive OAuth
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+          test "${GOOGLE_CLIENT_ID%%-*}" = "160241343420"
+          test -n "$GOOGLE_CLIENT_SECRET"
+          test -n "$GOOGLE_REFRESH_TOKEN"
+          response=$(curl -fsS --retry 3 -X POST --data-urlencode "client_id=$GOOGLE_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_REFRESH_TOKEN" --data-urlencode "grant_type=refresh_token" https://oauth2.googleapis.com/token)
+          access=$(jq -r '.access_token // empty' <<<"$response")
+          test -n "$access"
+          echo "::add-mask::$access"
+          expiry=$(date -u -d '+3500 seconds' '+%Y-%m-%dT%H:%M:%SZ')
+          token=$(jq -cn --arg a "$access" --arg r "$GOOGLE_REFRESH_TOKEN" --arg e "$expiry" '{access_token:$a,token_type:"Bearer",refresh_token:$r,expiry:$e}')
+          rclone config create drive drive client_id "$GOOGLE_CLIENT_ID" client_secret "$GOOGLE_CLIENT_SECRET" scope drive token "$token" --non-interactive >/dev/null
+
+      - name: Check all 20 episodes uploaded
+        run: |
+          set -euo pipefail
+          for n in $(seq -w 1 20); do
+            rclone lsf "drive:$PARTS/episode_$n.mkv" --files-only | grep -Fx "episode_$n.mkv"
+          done
+      - name: Merge sequentially and upload with live throughput
+        run: |
+          set -euo pipefail
+          fifo="$RUNNER_TEMP/episodes.ts"
+          mkfifo "$fifo"
+          # A continuous TS stream avoids downloading all 20 episodes to local SSD.
+          (
+            set -euo pipefail
+            for n in $(seq -w 1 20); do
+              echo "MERGING EPISODE $n/20"
+              rclone cat "drive:$PARTS/episode_$n.mkv" --retries 12 --low-level-retries 40 \
+                | ffmpeg -hide_banner -loglevel error -i pipe:0 -map 0:v:0 -map '0:a:0?' -c copy -bsf:v h264_mp4toannexb -f mpegts pipe:1
+            done
+          ) > "$fifo" &
+          producer=$!
+          set +e
+          ffmpeg -hide_banner -stats_period 15 -f mpegts -i "$fifo" -map 0:v:0 -map '0:a:0?' \
+            -c copy -bsf:a aac_adtstoasc -movflags +frag_keyframe+empty_moov+default_base_moof -f mp4 pipe:1 \
+            | rclone rcat "drive:$OUTPUT" --drive-chunk-size 128M --stats 15s --stats-one-line --stats-log-level NOTICE --log-level NOTICE --retries 12 --low-level-retries 60
+          rc=( "${PIPESTATUS[@]}" )
+          wait "$producer"
+          producer_rc=$?
+          set -e
+          if [ "${rc[0]}" -ne 0 ] || [ "${rc[1]}" -ne 0 ] || [ "$producer_rc" -ne 0 ]; then
+            echo "::error::Merge or upload failed"
+            exit 1
+          fi
+          size=$(rclone size --json "drive:$OUTPUT" --retries 10 | jq -r '.bytes // 0')
+          test "$size" -gt 1000000
+          test "$size" -le "$MAX_BYTES"
+          echo "## Upload finished and verified" >> "$GITHUB_STEP_SUMMARY"
+          echo "Final Drive path: $OUTPUT" >> "$GITHUB_STEP_SUMMARY"
+          echo "Final size: $size bytes (limit $MAX_BYTES)" >> "$GITHUB_STEP_SUMMARY"
+          echo "20 episodes merged; Drive upload completed." >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove temporary Drive segments after verified upload
+        run: |
+          rclone purge "drive:$PARTS" --retries 10 || echo "::warning::Temporary segments could not be deleted."
