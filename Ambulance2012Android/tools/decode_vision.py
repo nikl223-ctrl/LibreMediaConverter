@@ -14,6 +14,7 @@ import tempfile
 import zipfile
 import time
 import os
+import re
 import xml.etree.ElementTree as ET
 
 def decrypt(source: pathlib.Path, output: pathlib.Path) -> None:
@@ -119,6 +120,23 @@ def main():
             print("VISION_VEHICLE_PHYSICS=",json.dumps(results["vehicle_physics_summary"],ensure_ascii=False)[:8500],flush=True)
             results["vehicle_files"]=[x.filename for x in entries if x.filename.lower().startswith("vehicles/") and not x.is_dir()][:80]
             results["sound_files"]=[x.filename for x in entries if x.filename.lower().startswith("sfx/") and x.filename.lower().endswith((".fsb",".wav",".ogg",".fev"))][:60]
+            results["sound_bank_headers"]={}
+            for bank in ("sfx/RTW_2011_bank00.fsb","sfx/RTW_2011_bank01.fsb","sfx/RTW_2011.fev"):
+                if bank not in z.namelist():
+                    continue
+                with z.open(bank) as sound_file:
+                    header=sound_file.read(96)
+                    header_2m=sound_file.read(2*1024*1024)
+                results["sound_bank_headers"][bank]={
+                    "header_hex":header[:48].hex(" "),
+                    "header_ascii":"".join(chr(b) if 32<=b<=126 else "." for b in header[:64]),
+                    "size":z.getinfo(bank).file_size,
+                    "likely_sfx_label_words":[word.decode("latin1") for word in
+                        re.findall(rb"[A-Za-z0-9_()\\- ]{4,70}",header_2m)
+                        if any(phrase in word.lower() for phrase in
+                            [b"horn",b"siren",b"motor",b"engine",b"standgas",b"diesel",b"rtw",b"drive",b"alarm",b"signal"] )][:35]
+                }
+            print("VISION_SOUND_HEADERS=",json.dumps(results["sound_bank_headers"])[:5000],flush=True)
             results["ambulance_models"]=[x.filename for x in entries if ("rtw" in x.filename.lower() or "ktw" in x.filename.lower() or "ambulance" in x.filename.lower()) and x.filename.lower().endswith((".vmesh",".model",".vmesh_data",".dds"))][:50]
             print("VISION_CITY_SCENE_META=",json.dumps(results["scene_metadata"],ensure_ascii=False)[:5500],flush=True)
             print("VISION_CITY_SOUND_LIST=",json.dumps(results["sound_files"][:20]),flush=True)
