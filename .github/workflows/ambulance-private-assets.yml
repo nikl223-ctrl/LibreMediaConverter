@@ -1,0 +1,159 @@
+name: PRIVATE Rettungswagen PC Original Sounds and Textures to Android
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "Ambulance2012Android/**"
+      - ".github/workflows/ambulance-private-assets.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  original-windows:
+    if: github.event.repository.private == true
+    name: Windows - personal original PC game assets
+    runs-on: windows-2022
+    timeout-minutes: 40
+    env:
+      GITHUB_REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install DDS to WebP and FSB4 to WAV tools
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade Pillow
+          Invoke-WebRequest -Uri "https://github.com/vgmstream/vgmstream/releases/download/r2117/vgmstream-win64.zip" -OutFile "$env:RUNNER_TEMP/vgmstream.zip" -TimeoutSec 180
+          Expand-Archive -LiteralPath "$env:RUNNER_TEMP/vgmstream.zip" -DestinationPath "$env:RUNNER_TEMP/vgmstream" -Force
+          $exe = Get-ChildItem -Path "$env:RUNNER_TEMP/vgmstream" -Filter 'vgmstream-cli.exe' -Recurse | Select-Object -First 1
+          if ($null -eq $exe) { throw "Open source decoder missing" }
+          "VGMSTREAM_CLI=$($exe.FullName)" >> $env:GITHUB_ENV
+      - name: Import personal game textures and sounds from connected Drive
+        shell: pwsh
+        run: ./Ambulance2012Android/tools/private_asset_worker.ps1
+      - name: Transfer data privately between two GitHub workers
+        uses: actions/upload-artifact@v4
+        with:
+          name: Private-PC-Game-Converted-Assets
+          path: Ambulance2012Android/original_assets/*
+          retention-days: 1
+          if-no-files-found: error
+
+  android-apk:
+    needs: original-windows
+    if: github.event.repository.private == true
+    name: Android ARM64 - Build APK using real personal game assets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout Android source code
+        uses: actions/checkout@v4
+
+      - name: Load real privately converted PC game materials and sounds
+        uses: actions/download-artifact@v4
+        with:
+          name: Private-PC-Game-Converted-Assets
+          path: Ambulance2012Android/original_assets
+
+      - name: Enforce authentic recording/material presence
+        shell: bash
+        run: |
+          test -s Ambulance2012Android/original_assets/siren.wav
+          test -s Ambulance2012Android/original_assets/engine_idle.wav
+          test -s Ambulance2012Android/original_assets/engine_normal.wav
+          test -s Ambulance2012Android/original_assets/brick_wall.webp
+          test -s Ambulance2012Android/original_assets/rtw_exterior.webp
+
+      - name: Install Java 17 for Android
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Configure Android platform tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f | sort -V | tail -n1)"
+          test -n "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Download Godot 4.5.2 editor and matching Android templates
+        shell: bash
+        run: |
+          set -euxo pipefail
+          wget -q -O "$RUNNER_TEMP/godot.zip" \
+            "https://github.com/godotengine/godot/releases/download/4.5.2-stable/Godot_v4.5.2-stable_linux.x86_64.zip"
+          wget -q -O "$RUNNER_TEMP/export.tpz" \
+            "https://github.com/godotengine/godot/releases/download/4.5.2-stable/Godot_v4.5.2-stable_export_templates.tpz"
+          mkdir -p "$RUNNER_TEMP/godot" "$RUNNER_TEMP/templates"
+          unzip -q "$RUNNER_TEMP/godot.zip" -d "$RUNNER_TEMP/godot"
+          unzip -q "$RUNNER_TEMP/export.tpz" -d "$RUNNER_TEMP/templates"
+          sudo install -m 0755 "$RUNNER_TEMP/godot/Godot_v4.5.2-stable_linux.x86_64" /usr/local/bin/godot
+          mkdir -p "$HOME/.local/share/godot/export_templates/4.5.2.stable"
+          cp "$RUNNER_TEMP/templates/templates/"* "$HOME/.local/share/godot/export_templates/4.5.2.stable/"
+          godot --version
+
+      - name: Configure Android signing
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p "$HOME/.config/godot"
+          cat > "$HOME/.config/godot/editor_settings-4.tres" <<EOF
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "$ANDROID_HOME"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          export/android/debug_keystore = "$RUNNER_TEMP/rescue-debug.keystore"
+          export/android/debug_keystore_user = "androiddebugkey"
+          export/android/debug_keystore_pass = "android"
+          EOF
+          keytool -genkeypair -v \
+            -keystore "$RUNNER_TEMP/rescue-debug.keystore" \
+            -storepass android -keypass android \
+            -alias androiddebugkey -keyalg RSA -keysize 2048 \
+            -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Import assets and check GDScript syntax
+        shell: bash
+        run: |
+          set -o pipefail
+          godot --headless --editor --path Ambulance2012Android --quit 2>&1 | tee "$RUNNER_TEMP/parse.log"
+          if grep -E 'SCRIPT ERROR|Parse Error|Failed to load script' "$RUNNER_TEMP/parse.log"; then
+            exit 1
+          fi
+
+      - name: Run ambulance driving and emergency mission gameplay test
+        shell: bash
+        run: |
+          set -o pipefail
+          godot --headless --path Ambulance2012Android --script res://tools/test_ambulance.gd 2>&1 | tee "$RUNNER_TEMP/rescue-test.log"
+          grep -q 'AMBULANCE_SMOKE_PASS' "$RUNNER_TEMP/rescue-test.log"
+          if grep -E 'SCRIPT ERROR|Invalid call|Invalid assignment|Parse Error' "$RUNNER_TEMP/rescue-test.log"; then
+            exit 1
+          fi
+
+      - name: Build, sign and verify Android APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p Ambulance2012Android/build
+          godot --headless --path Ambulance2012Android --export-debug "Android" "build/RettungsdienstSimulator.apk"
+          test -s Ambulance2012Android/build/RettungsdienstSimulator.apk
+          unzip -t Ambulance2012Android/build/RettungsdienstSimulator.apk | tail -n1
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose Ambulance2012Android/build/RettungsdienstSimulator.apk
+          ls -lh Ambulance2012Android/build/RettungsdienstSimulator.apk
+
+      - name: Publish APK for Samsung Galaxy S24 Ultra
+        uses: actions/upload-artifact@v4
+        with:
+          name: RettungsdienstSimulator-Originalton-und-Texturen-APK
+          path: Ambulance2012Android/build/RettungsdienstSimulator.apk
+          retention-days: 30
+          if-no-files-found: error
