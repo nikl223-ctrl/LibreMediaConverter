@@ -14,6 +14,7 @@ import tempfile
 import zipfile
 import time
 import os
+import xml.etree.ElementTree as ET
 
 def decrypt(source: pathlib.Path, output: pathlib.Path) -> None:
     key=0x55
@@ -67,6 +68,41 @@ def main():
                 for item in sorted(entries,key=lambda i:i.file_size,reverse=True)[:100]
             ]
             results["zip_valid"]=True
+            # Identify scene and vehicle metadata without including game files in outputs.
+            results["scene_metadata"]={}
+            for candidate in ("city.xml","cluster.xml","vehicles/rtw.xvd","vehicles/ktw.xvd","vehicles/rtw-2.xvd","vehicles/vehicle-list.txt","ui/mainmenu.xml"):
+                if candidate not in z.namelist():
+                    continue
+                item=z.getinfo(candidate)
+                stats={"uncompressed_bytes":item.file_size,"first_bytes_hex":z.open(candidate).read(32).hex(" ")}
+                if candidate.endswith(".txt"):
+                    stats["first_lines"]=[line[:130] for line in z.read(candidate)[:1000].decode("utf-8",errors="replace").splitlines()[:5]]
+                else:
+                    tag_counts=collections.Counter()
+                    attribute_examples={}
+                    try:
+                        with z.open(candidate) as content:
+                            for _,element in ET.iterparse(content,events=("start",)):
+                                tag=element.tag.split("}")[-1]
+                                tag_counts[tag]+=1
+                                if tag not in attribute_examples:
+                                    attribute_examples[tag]=list(element.attrib)[:10]
+                                element.clear()
+                                if sum(tag_counts.values())>1800:
+                                    break
+                        stats["parsed_as_xml"]=True
+                        stats["xml_element_counts_first_1800"]=dict(tag_counts.most_common(30))
+                        stats["xml_attribute_keys_sample"]=dict(list(attribute_examples.items())[:15])
+                    except Exception as e:
+                        stats["parsed_as_xml"]=False
+                        stats["parse_error_type"]=type(e).__name__
+                results["scene_metadata"][candidate]=stats
+            results["vehicle_files"]=[x.filename for x in entries if x.filename.lower().startswith("vehicles/") and not x.is_dir()][:80]
+            results["sound_files"]=[x.filename for x in entries if x.filename.lower().startswith("sfx/") and x.filename.lower().endswith((".fsb",".wav",".ogg",".fev"))][:60]
+            results["ambulance_models"]=[x.filename for x in entries if ("rtw" in x.filename.lower() or "ktw" in x.filename.lower() or "ambulance" in x.filename.lower()) and x.filename.lower().endswith((".vmesh",".model",".vmesh_data",".dds"))][:50]
+            print("VISION_CITY_SCENE_META=",json.dumps(results["scene_metadata"],ensure_ascii=False)[:5500],flush=True)
+            print("VISION_CITY_SOUND_LIST=",json.dumps(results["sound_files"][:20]),flush=True)
+            print("VISION_CITY_AMBULANCE_MODELS=",json.dumps(results["ambulance_models"][:20]),flush=True)
             print("VISION_ARCHIVE_VALID_ZIP entries=",len(entries),flush=True)
             print("VISION_ARCHIVE_EXTENSIONS=",json.dumps(dict(counts.most_common(25))),flush=True)
             print("VISION_ARCHIVE_FIRST_FILES=",json.dumps([i.filename for i in entries[:50]]),flush=True)
