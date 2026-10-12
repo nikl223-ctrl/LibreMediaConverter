@@ -82,6 +82,12 @@ function Add-FileResult([hashtable]$entry) {
       if($LASTEXITCODE -ne 0) { Write-Warning 'Archive analysis could not complete; base metadata is still collected' }
       python Ambulance2012Android/tools/decode_vision.py --input $target --out (Join-Path $reportDir 'city-zip-inventory.json')
       if($LASTEXITCODE -ne 0) { Write-Warning 'XOR archive decoding or ZIP inventory could not complete' }
+      # Verify actual original material/sound decoding, without publishing originals.
+      python Ambulance2012Android/tools/verify_original_media.py `
+        --city $target `
+        --vgmstream "$env:VGMSTREAM_CLI" `
+        --out (Join-Path $reportDir 'original-media-decoder-test.json')
+      if($LASTEXITCODE -ne 0) { Write-Warning 'Original material/sound decoder test failed' }
     }
     $matched = $size -eq $entry.expectedBytes
     if(-not $matched) { $script:failed++; Write-Warning ('Size mismatch: ' + $entry.name) }
