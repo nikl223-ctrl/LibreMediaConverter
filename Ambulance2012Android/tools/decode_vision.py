@@ -97,6 +97,26 @@ def main():
                         stats["parsed_as_xml"]=False
                         stats["parse_error_type"]=type(e).__name__
                 results["scene_metadata"][candidate]=stats
+            results["vehicle_physics_summary"]={}
+            for vehicle_id in ("rtw","ktw","rtw-2","k1","k2"):
+                path=f"vehicles/{vehicle_id}.xvd"
+                if path not in z.namelist():
+                    continue
+                try:
+                    root=ET.fromstring(z.read(path))
+                    wanted=("MeshFile","CollisionMeshFile","CockpitFile","InteriorFile","WheelFile","Mass",
+                            "MassCenterOffset","SteerScaleFactor","MaximumSteerAngle","SuspensionSpring",
+                            "SuspensionDamper","SuspensionTarget","SuspensionTravel","Radius")
+                    numbers={}
+                    for tag in wanted:
+                        elements=root.findall(".//"+tag)
+                        values=[("".join(x.itertext())).strip()[:130] for x in elements[:4]]
+                        if values:
+                            numbers[tag]=values
+                    results["vehicle_physics_summary"][vehicle_id]=numbers
+                except Exception as e:
+                    results["vehicle_physics_summary"][vehicle_id]={"error":type(e).__name__}
+            print("VISION_VEHICLE_PHYSICS=",json.dumps(results["vehicle_physics_summary"],ensure_ascii=False)[:8500],flush=True)
             results["vehicle_files"]=[x.filename for x in entries if x.filename.lower().startswith("vehicles/") and not x.is_dir()][:80]
             results["sound_files"]=[x.filename for x in entries if x.filename.lower().startswith("sfx/") and x.filename.lower().endswith((".fsb",".wav",".ogg",".fev"))][:60]
             results["ambulance_models"]=[x.filename for x in entries if ("rtw" in x.filename.lower() or "ktw" in x.filename.lower() or "ambulance" in x.filename.lower()) and x.filename.lower().endswith((".vmesh",".model",".vmesh_data",".dds"))][:50]
