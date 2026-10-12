@@ -73,6 +73,9 @@ func _draw() -> void:
     _print("GESCHWINDIGKEIT",Vector2(w-346*s,52*s),int(16*s),pale)
     _print("%03d KM/H" % int(absf(game.speed)*3.6),Vector2(w-346*s,93*s),int(37*s),white)
     _print("R" if game.reverse_gear else "D",Vector2(w-95*s,94*s),int(25*s),gold)
+    var fps: int = Engine.get_frames_per_second()
+    var performance_color: Color = green if fps>=45 else (gold if fps>=30 else Color("#ff8f7e"))
+    _print("%d FPS" % fps,Vector2(w-180*s,119*s),int(14*s),performance_color)
 
     # Emergency priority and current mission state.
     _panel(Rect2(Vector2(w-364*s,147*s),Vector2(340*s,57*s)),cyan if game.lights_on else pale)
