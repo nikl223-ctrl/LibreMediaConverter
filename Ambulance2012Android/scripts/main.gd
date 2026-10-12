@@ -178,34 +178,58 @@ func _build_marker() -> void:
 
 func _build_audio() -> void:
     siren_player = AudioStreamPlayer.new()
-    siren_player.name = "SyntheticWarningSiren"
-    siren_player.volume_db = -13
-    siren_player.stream = _make_tone(true)
+    siren_player.name = "EmergencySiren"
+    siren_player.volume_db = -10
+    var original_siren := "res://original_assets/siren.ogg"
+    if ResourceLoader.exists(original_siren):
+        siren_player.stream = load(original_siren)
+    else:
+        siren_player.stream = _make_tone(true)
     add_child(siren_player)
     engine_player = AudioStreamPlayer.new()
-    engine_player.name = "SyntheticDieselEngine"
-    engine_player.volume_db = -24
-    engine_player.stream = _make_tone(false)
+    engine_player.name = "DieselEngine"
+    engine_player.volume_db = -20
+    var original_engine := "res://original_assets/engine.ogg"
+    if ResourceLoader.exists(original_engine):
+        engine_player.stream = load(original_engine)
+    else:
+        engine_player.stream = _make_tone(false)
     add_child(engine_player)
 
 func _make_tone(emergency: bool) -> AudioStreamWAV:
+    # Better fallback when private source recordings aren't supplied:
+    # European alternating two-tone horn, plus non-sinusoidal diesel pulses.
     var rate: int = 22050
-    var count: int = int(float(rate) * (4.0 if emergency else 2.0))
+    var duration: float = 3.6 if emergency else 2.0
+    var count: int = int(float(rate) * duration)
     var pcm := PackedByteArray()
     pcm.resize(count * 2)
     var phase: float = 0.0
+    var secondary_phase: float = 0.0
     for i in range(count):
         var t: float = float(i) / float(rate)
-        var frequency: float = 620.0 + 185.0 * sin(t * PI * 0.5) if emergency else (87.0 + 6.0 * sin(t * PI * 2.0))
-        phase += TAU * frequency / float(rate)
-        var tone: float = sin(phase) * 0.54 + sin(phase * 0.52) * 0.24
-        if not emergency:
-            tone += sin(phase * 2.8) * 0.14
-        var value: int = int(clampf(tone * 17500.0,-31000,31000))
+        var signal: float = 0.0
+        if emergency:
+            var phase_beat: float = fmod(t, 1.20)
+            var high_tone: bool = phase_beat >= 0.6
+            var frequency: float = (588.0 if high_tone else 440.0)
+            frequency *= 1.0 + 0.006 * sin(t * 32.0)
+            phase += TAU * frequency / float(rate)
+            secondary_phase += TAU * (frequency * 1.51) / float(rate)
+            var edge: float = minf(1.0, minf(fmod(phase_beat, 0.6) * 22.0, (0.6 - fmod(phase_beat, 0.6)) * 25.0))
+            signal = (sin(phase) * 0.53 + sin(phase * 2.0) * 0.21 + sin(secondary_phase) * 0.11) * edge
+        else:
+            var low_hz: float = 65.0 + sin(t * 9.0) * 2.0
+            phase += TAU * low_hz / float(rate)
+            secondary_phase += TAU * (low_hz * 2.0) / float(rate)
+            var engine_pulse: float = maxf(0.0, sin(phase))
+            signal = sin(phase) * 0.25 + sin(secondary_phase) * 0.18 + pow(engine_pulse, 6.0) * 0.35
+            signal += sin(phase * 0.23 + sin(t * 61.0)) * 0.05
+        var value: int = int(clampf(signal * 20000.0, -31000.0, 31000.0))
         if value < 0:
             value += 65536
-        pcm[2*i] = value & 255
-        pcm[2*i+1] = (value >> 8) & 255
+        pcm[2 * i] = value & 255
+        pcm[2 * i + 1] = (value >> 8) & 255
     var stream := AudioStreamWAV.new()
     stream.format = AudioStreamWAV.FORMAT_16_BITS
     stream.mix_rate = rate
