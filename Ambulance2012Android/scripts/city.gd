@@ -429,7 +429,7 @@ func _build_traffic() -> void:
             root.position=Vector3(pos,0.06,road+lane)
             root.rotation.y=-PI*0.5 if direction>0 else PI*0.5
         _create_car_model(root,palette[i%palette.size()],false)
-        traffic.append({"node":root,"axis":axis,"direction":direction,"speed":rng.randf_range(6.0,13.0),"phase":rng.randf_range(0.0,TAU)})
+        traffic.append({"node":root,"axis":axis,"direction":direction,"speed":rng.randf_range(10.0,19.0),"phase":rng.randf_range(0.0,TAU)})
 
 func advance_traffic(delta: float, player: Node3D) -> void:
     traffic_time += delta
