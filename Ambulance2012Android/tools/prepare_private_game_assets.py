@@ -23,6 +23,7 @@ from PIL import Image
 DDS_MAP={
     "brick_wall.webp":"textures/buildings/brick_red_diff.dds",
     "brick_wall2.webp":"textures/buildings/brick_red_2_diff.dds",
+    "city_highrise.webp":"textures/buildings/city_hr1_var01_diff.dds",
     "sidewalk.webp":"textures/buildings/Gehwege.dds",
     "rtw_exterior.webp":"textures/vehicles/RTW/aussen_1.dds",
     "rtw_exterior_secondary.webp":"textures/vehicles/RTW/aussen_2.dds",
@@ -48,10 +49,10 @@ def fsb4_stream_names(data: bytes) -> list[dict]:
     pos=0x30
     names=[]
     for i in range(num):
-        if pos+32>len(data):
+        if pos+0x50>len(data):
             break
         header_size=struct.unpack_from("<H",data,pos)[0]
-        if header_size<32 or header_size>500 or pos+header_size>len(data):
+        if header_size<0x50 or header_size>500 or pos+header_size>len(data):
             break
         name=data[pos+2:pos+32].split(b"\0")[0].decode("latin-1",errors="replace").strip()
         names.append({"index":i+1,"name":name})
@@ -108,7 +109,11 @@ def main():
                 for output_name,patterns in ORIGINAL_AUDIO.items():
                     if (output/output_name).exists():
                         continue
-                    matches=[item for item in names if any(re.search(p,item["name"],re.I) for p in patterns)]
+                    matches=[]
+                    for pattern in patterns:
+                        matches=[item for item in names if re.search(pattern,item["name"],re.I)]
+                        if matches:
+                            break
                     if not matches:
                         continue
                     selected=matches[0]
