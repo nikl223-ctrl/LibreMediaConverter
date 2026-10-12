@@ -1,0 +1,4 @@
+Film: Paddington 2
+Source Drive ID: 1f51SL-MNBELQiAqr1F2ZrjwyPPc5wIdP
+Goal: 20 runner disk-shard integrity test + 1 coordinator
+Mode: GitHub artifact exchange; not a mounted shared filesystem.
