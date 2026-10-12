@@ -1,0 +1,59 @@
+name: 21 Runner Shared Storage Experiment
+on:
+  push:
+    branches: [main]
+    paths:
+      - "storage-test-requests/*.txt"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  storage-nodes:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        node: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]
+    steps:
+      - name: Check actual available SSD
+        run: |
+          df -h .
+          df -B1 --output=avail . | tail -1
+      - name: Write and checksum 32 MiB shard
+        run: |
+          mkdir -p shard
+          dd if=/dev/urandom of=shard/node-${{ matrix.node }}.bin bs=1M count=32 status=none
+          sha256sum shard/* > shard/checksum.txt
+      - name: Export shard to shared GitHub artifact storage
+        uses: actions/upload-artifact@v4
+        with:
+          name: disk-shard-${{ matrix.node }}
+          path: shard/
+          retention-days: 1
+          compression-level: 0
+  coordinator:
+    needs: storage-nodes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check coordinator disk
+        run: df -h .
+      - name: Retrieve 20 distributed shards
+        uses: actions/download-artifact@v4
+        with:
+          pattern: disk-shard-*
+          path: shards
+      - name: Validate shards and explain topology
+        run: |
+          set -euo pipefail
+          for n in $(seq 0 19); do
+            cd "$GITHUB_WORKSPACE/shards/disk-shard-$n"
+            sha256sum -c checksum.txt
+          done
+          echo "PASS: 20 workers exchanged storage blocks via GitHub artifact service"
+          echo "NOTE: this is distributed artifact storage, NOT a mounted 280 GB POSIX filesystem."
+          du -sh "$GITHUB_WORKSPACE/shards"
+          df -h .
+          echo "## 21 runner storage experiment" >> "$GITHUB_STEP_SUMMARY"
+          echo "20 storage runners + 1 coordinator: all shard checksums passed." >> "$GITHUB_STEP_SUMMARY"
+          echo "GitHub artifacts enable sharing, but do not combine local disks into a single mount." >> "$GITHUB_STEP_SUMMARY"
