@@ -1,0 +1,3 @@
+Start Zoomania 2 8K UHD test.
+Source Drive ID: 1HotE6Xa2ldGlYnI3hy7zNdJ0VwTtkDSV
+Output: 7680x4320 H.264 100 Mbps, 20 encoder workers, final rclone multi-thread upload test.
