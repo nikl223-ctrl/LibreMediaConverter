@@ -1,0 +1,3 @@
+Restart Zoomania 2 8K UHD conversion after fixing merge disk exhaustion.
+Output: 7680x4320 H.264 100 Mbps.
+20 encoder workers; final concat is streamed directly to Google Drive.
