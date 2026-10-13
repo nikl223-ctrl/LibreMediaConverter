@@ -1,0 +1,2 @@
+Restart after verified direct streaming merge fix.
+8K 7680x4320 H.264 100 Mbps, 20 workers, ffmpeg pipe directly to rclone rcat.
