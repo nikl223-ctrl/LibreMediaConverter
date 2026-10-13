@@ -97,21 +97,19 @@ jobs:
         with:
           pattern: zoomania2-8k100m-part-*
           path: /tmp/parts
-      - name: Assemble locally then multi-lane upload
+      - name: Assemble and stream directly to Drive
         run: |
           set -euo pipefail
           find /tmp/parts -name '*.mp4' -type f | sort > /tmp/files
           test "$(wc -l < /tmp/files)" -eq 20
           : > /tmp/list
           while IFS= read -r f; do printf "file '%s'\\n" "$f" >> /tmp/list; done < /tmp/files
-          ffmpeg -hide_banner -f concat -safe 0 -i /tmp/list -map 0 -c copy -movflags +faststart /tmp/Zoomania_2_8K_H264_100M_5.1.mp4
-          test -s /tmp/Zoomania_2_8K_H264_100M_5.1.mp4
-          rclone copyto /tmp/Zoomania_2_8K_H264_100M_5.1.mp4 "drive:Video Converter/Fertig/Zoomania_2_8K_H264_100M_5.1.mp4" \\
-            --multi-thread-streams 8 --multi-thread-cutoff 256M --multi-thread-chunk-size 128M \\
-            --drive-chunk-size 256M --buffer-size 128M --stats 5s --stats-one-line \\
-            --retries 20 --low-level-retries 100
-          local_size=$(stat -c %s /tmp/Zoomania_2_8K_H264_100M_5.1.mp4)
+          df -h
+          ffmpeg -hide_banner -f concat -safe 0 -i /tmp/list -map 0 -c copy \
+            -movflags +frag_keyframe+empty_moov+default_base_moof -f mp4 pipe:1 \
+            | rclone rcat "drive:Video Converter/Fertig/Zoomania_2_8K_H264_100M_5.1.mp4" \
+                --drive-chunk-size 256M --buffer-size 64M --stats 5s --stats-one-line \
+                --retries 20 --low-level-retries 100
           remote_size=$(rclone size --json "drive:Video Converter/Fertig/Zoomania_2_8K_H264_100M_5.1.mp4" | jq -r '.bytes // 0')
-          test "$remote_size" -eq "$local_size"
-          echo "Verified final Drive size: $remote_size bytes" >> "$GITHUB_STEP_SUMMARY"
-          echo "Upload used rclone multi-thread-streams=8" >> "$GITHUB_STEP_SUMMARY"
+          test "$remote_size" -gt 0
+          echo "Streamed final Drive size: $remote_size bytes" >> "$GITHUB_STEP_SUMMARY"
