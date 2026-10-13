@@ -1,0 +1,111 @@
+name: Zoomania 2 8K 100M 20+1 Multi-Lane Upload
+on:
+  push:
+    branches: [main]
+    paths: ["conversion-requests-zoomania2-8k100m/*.txt"]
+permissions:
+  contents: read
+jobs:
+  encode:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        part: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          timeout 300s sudo apt-get update -qq
+          timeout 300s sudo apt-get install -y --no-install-recommends ffmpeg jq curl ca-certificates
+          curl -fsSL https://rclone.org/install.sh | sudo bash
+      - name: Drive auth
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+          test "${GOOGLE_CLIENT_ID%%-*}" = "160241343420"
+          t=$(curl -fsS -X POST --data-urlencode "client_id=$GOOGLE_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_REFRESH_TOKEN" --data-urlencode "grant_type=refresh_token" https://oauth2.googleapis.com/token)
+          a=$(jq -r '.access_token // empty' <<<"$t"); test -n "$a"; echo "::add-mask::$a"
+          e=$(date -u -d '+3500 seconds' '+%Y-%m-%dT%H:%M:%SZ')
+          j=$(jq -cn --arg a "$a" --arg r "$GOOGLE_REFRESH_TOKEN" --arg e "$e" '{access_token:$a,token_type:"Bearer",refresh_token:$r,expiry:$e}')
+          rclone config create drive drive client_id "$GOOGLE_CLIENT_ID" client_secret "$GOOGLE_CLIENT_SECRET" scope drive token "$j" --non-interactive >/dev/null
+      - name: Download Zoomania 2
+        run: |
+          mkdir -p /tmp/in
+          rclone backend copyid drive: "1HotE6Xa2ldGlYnI3hy7zNdJ0VwTtkDSV" /tmp/in/ --stats 10s
+          f=$(find /tmp/in -type f | head -1); test -s "$f"; mv "$f" /tmp/source
+      - name: Encode this twentieth in 8K H264
+        env:
+          P: ${{ matrix.part }}
+        run: |
+          set -euo pipefail
+          dur=$(ffprobe -v error -show_entries format=duration -of csv=p=0 /tmp/source)
+          start=$(python3 -c 'import sys; print(float(sys.argv[1])*int(sys.argv[2])/20)' "$dur" "$P")
+          len=$(python3 -c 'import sys; print(float(sys.argv[1])/20)' "$dur")
+          printf -v pn "%02d" "$P"
+          ffmpeg -hide_banner -stats_period 10 -ss "$start" -i /tmp/source -t "$len" -map 0:v:0 -map '0:a:0?' \
+            -vf 'scale=7680:4320:force_original_aspect_ratio=decrease:flags=lanczos,pad=7680:4320:(ow-iw)/2:(oh-ih)/2,setsar=1' \
+            -c:v libx264 -preset ultrafast -pix_fmt yuv420p -b:v 100M -maxrate 120M -bufsize 200M \
+            -force_key_frames 'expr:gte(t,n_forced*2)' -c:a aac -ac 6 -b:a 640k -ar 48000 \
+            -movflags +faststart "/tmp/part_${pn}.mp4"
+          mkdir -p /tmp/shard
+          mv "/tmp/part_${pn}.mp4" /tmp/shard/
+      - name: Store encoded shard
+        uses: actions/upload-artifact@v4
+        with:
+          name: zoomania2-8k100m-part-${{ matrix.part }}
+          path: /tmp/shard/*.mp4
+          compression-level: 0
+          retention-days: 1
+  assemble:
+    needs: encode
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Install
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg jq curl ca-certificates
+          curl -fsSL https://rclone.org/install.sh | sudo bash
+      - name: Drive auth
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+          test "${GOOGLE_CLIENT_ID%%-*}" = "160241343420"
+          t=$(curl -fsS -X POST --data-urlencode "client_id=$GOOGLE_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_REFRESH_TOKEN" --data-urlencode "grant_type=refresh_token" https://oauth2.googleapis.com/token)
+          a=$(jq -r '.access_token // empty' <<<"$t"); test -n "$a"; echo "::add-mask::$a"
+          e=$(date -u -d '+3500 seconds' '+%Y-%m-%dT%H:%M:%SZ')
+          j=$(jq -cn --arg a "$a" --arg r "$GOOGLE_REFRESH_TOKEN" --arg e "$e" '{access_token:$a,token_type:"Bearer",refresh_token:$r,expiry:$e}')
+          rclone config create drive drive client_id "$GOOGLE_CLIENT_ID" client_secret "$GOOGLE_CLIENT_SECRET" scope drive token "$j" --non-interactive >/dev/null
+      - name: Fetch 20 encoded shards
+        uses: actions/download-artifact@v4
+        with:
+          pattern: zoomania2-8k100m-part-*
+          path: /tmp/parts
+      - name: Assemble locally then multi-lane upload
+        run: |
+          set -euo pipefail
+          find /tmp/parts -name '*.mp4' -type f | sort > /tmp/files
+          test "$(wc -l < /tmp/files)" -eq 20
+          : > /tmp/list
+          while IFS= read -r f; do printf "file '%s'\\n" "$f" >> /tmp/list; done < /tmp/files
+          ffmpeg -hide_banner -f concat -safe 0 -i /tmp/list -map 0 -c copy -movflags +faststart /tmp/Zoomania_2_8K_H264_100M_5.1.mp4
+          test -s /tmp/Zoomania_2_8K_H264_100M_5.1.mp4
+          rclone copyto /tmp/Zoomania_2_8K_H264_100M_5.1.mp4 "drive:Video Converter/Fertig/Zoomania_2_8K_H264_100M_5.1.mp4" \\
+            --multi-thread-streams 8 --multi-thread-cutoff 256M --multi-thread-chunk-size 128M \\
+            --drive-chunk-size 256M --buffer-size 128M --stats 5s --stats-one-line \\
+            --retries 20 --low-level-retries 100
+          local_size=$(stat -c %s /tmp/Zoomania_2_8K_H264_100M_5.1.mp4)
+          remote_size=$(rclone size --json "drive:Video Converter/Fertig/Zoomania_2_8K_H264_100M_5.1.mp4" | jq -r '.bytes // 0')
+          test "$remote_size" -eq "$local_size"
+          echo "Verified final Drive size: $remote_size bytes" >> "$GITHUB_STEP_SUMMARY"
+          echo "Upload used rclone multi-thread-streams=8" >> "$GITHUB_STEP_SUMMARY"
