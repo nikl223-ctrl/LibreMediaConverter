@@ -1,0 +1,106 @@
+name: Das Kanu des Manitu 4K 100M 20+1 Distributed Encode
+on:
+  push:
+    branches: [main]
+    paths: ["conversion-requests-kanu-manitu-4k100m/*.txt"]
+permissions:
+  contents: read
+jobs:
+  encode:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        part: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          timeout 300s sudo apt-get update -qq
+          timeout 300s sudo apt-get install -y --no-install-recommends ffmpeg jq curl ca-certificates
+          curl -fsSL https://rclone.org/install.sh | sudo bash
+      - name: Drive auth
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+          test "${GOOGLE_CLIENT_ID%%-*}" = "160241343420"
+          t=$(curl -fsS -X POST --data-urlencode "client_id=$GOOGLE_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_REFRESH_TOKEN" --data-urlencode "grant_type=refresh_token" https://oauth2.googleapis.com/token)
+          a=$(jq -r '.access_token // empty' <<<"$t"); test -n "$a"; echo "::add-mask::$a"
+          e=$(date -u -d '+3500 seconds' '+%Y-%m-%dT%H:%M:%SZ')
+          j=$(jq -cn --arg a "$a" --arg r "$GOOGLE_REFRESH_TOKEN" --arg e "$e" '{access_token:$a,token_type:"Bearer",refresh_token:$r,expiry:$e}')
+          rclone config create drive drive client_id "$GOOGLE_CLIENT_ID" client_secret "$GOOGLE_CLIENT_SECRET" scope drive token "$j" --non-interactive >/dev/null
+      - name: Download Das Kanu des Manitu
+        run: |
+          mkdir -p /tmp/in
+          rclone backend copyid drive: "1bk1EXm1HM1gv8dmbM3cXKIqkHNNtQUBo" /tmp/in/ --stats 10s
+          f=$(find /tmp/in -type f | head -1); test -s "$f"; mv "$f" /tmp/source
+      - name: Encode this twentieth in 4K H264
+        env:
+          P: ${{ matrix.part }}
+        run: |
+          set -euo pipefail
+          dur=$(ffprobe -v error -show_entries format=duration -of csv=p=0 /tmp/source)
+          start=$(python3 -c 'import sys; print(float(sys.argv[1])*int(sys.argv[2])/20)' "$dur" "$P")
+          len=$(python3 -c 'import sys; print(float(sys.argv[1])/20)' "$dur")
+          printf -v pn "%02d" "$P"
+          ffmpeg -hide_banner -stats_period 10 -ss "$start" -i /tmp/source -t "$len" -map 0:v:0 -map '0:a:0?' \
+            -vf 'scale=3840:2160:force_original_aspect_ratio=decrease,pad=3840:2160:(ow-iw)/2:(oh-ih)/2,setsar=1' \
+            -c:v libx264 -preset ultrafast -pix_fmt yuv420p -b:v 100M -maxrate 120M -bufsize 200M \
+            -force_key_frames 'expr:gte(t,n_forced*2)' -c:a aac -ac 6 -b:a 640k -ar 48000 \
+            -movflags +faststart "/tmp/part_${pn}.mp4"
+          mkdir -p /tmp/shard
+          mv "/tmp/part_${pn}.mp4" /tmp/shard/
+      - name: Store encoded shard
+        uses: actions/upload-artifact@v4
+        with:
+          name: kanumanitu4k100m-part-${{ matrix.part }}
+          path: /tmp/shard/*.mp4
+          compression-level: 0
+          retention-days: 1
+  assemble:
+    needs: encode
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Install
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg jq curl ca-certificates
+          curl -fsSL https://rclone.org/install.sh | sudo bash
+      - name: Drive auth
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+          test "${GOOGLE_CLIENT_ID%%-*}" = "160241343420"
+          t=$(curl -fsS -X POST --data-urlencode "client_id=$GOOGLE_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_REFRESH_TOKEN" --data-urlencode "grant_type=refresh_token" https://oauth2.googleapis.com/token)
+          a=$(jq -r '.access_token // empty' <<<"$t"); test -n "$a"; echo "::add-mask::$a"
+          e=$(date -u -d '+3500 seconds' '+%Y-%m-%dT%H:%M:%SZ')
+          j=$(jq -cn --arg a "$a" --arg r "$GOOGLE_REFRESH_TOKEN" --arg e "$e" '{access_token:$a,token_type:"Bearer",refresh_token:$r,expiry:$e}')
+          rclone config create drive drive client_id "$GOOGLE_CLIENT_ID" client_secret "$GOOGLE_CLIENT_SECRET" scope drive token "$j" --non-interactive >/dev/null
+      - name: Fetch 20 encoded shards
+        uses: actions/download-artifact@v4
+        with:
+          pattern: kanumanitu4k100m-part-*
+          path: /tmp/parts
+      - name: Assemble and upload final file directly
+        run: |
+          set -euo pipefail
+          find /tmp/parts -name '*.mp4' -type f | sort > /tmp/files
+          test "$(wc -l < /tmp/files)" -eq 20
+          : > /tmp/list
+          while IFS= read -r f; do printf "file '%s'\n" "$f" >> /tmp/list; done < /tmp/files
+          # Final movie is streamed to Drive; coordinator never needs full movie on its SSD.
+          ffmpeg -hide_banner -f concat -safe 0 -i /tmp/list -map 0 -c copy -movflags +frag_keyframe+empty_moov+default_base_moof -f mp4 pipe:1 \
+            | rclone rcat "drive:Video Converter/Fertig/Das_Kanu_des_Manitu_4K_H264_100M_5.1.mp4" --drive-chunk-size 256M --stats 10s --retries 20 --low-level-retries 100
+          size=$(rclone size --json "drive:Video Converter/Fertig/Das_Kanu_des_Manitu_4K_H264_100M_5.1.mp4" | jq -r '.bytes // 0')
+          test "$size" -gt 0
+          echo "Final Drive size: $size bytes" >> "$GITHUB_STEP_SUMMARY"
