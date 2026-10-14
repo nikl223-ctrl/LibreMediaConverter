@@ -1,0 +1,2 @@
+Retry Zoomania 2 8K with resilient Google OAuth and apt retries.
+7680x4320 H.264 100 Mbps, 20 workers, direct streaming merge to Drive.
