@@ -1,0 +1,2 @@
+Restart verified Zoomania 2 conversion.
+8K 7680x4320 H.264 100 Mbps; 20 workers; 15-minute package timeout with retries; direct FFmpeg pipe to rclone rcat.
