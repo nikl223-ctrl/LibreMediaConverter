@@ -1,0 +1,42 @@
+name: Upload Colab GPU result to Drive
+on:
+  release:
+    types: [published]
+permissions:
+  contents: read
+jobs:
+  upload:
+    if: startsWith(github.event.release.tag_name, 'colab-gpu-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Install ffmpeg and rclone
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg rclone
+      - name: Download segments from GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          mkdir -p segments
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D segments -p 'part_*.mp4'
+          test "$(find segments -name 'part_*.mp4' | wc -l)" -eq 6
+          find segments -name 'part_*.mp4' | sort | awk '{print "file '\''" ENVIRON["GITHUB_WORKSPACE"] "/" $0 "'\''"}' > concat.txt
+          ffmpeg -hide_banner -y -f concat -safe 0 -i concat.txt -c copy Zoomania_4K_GPU_Test.mp4
+      - name: Upload to Google Drive
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        run: |
+          test -n "$GOOGLE_CLIENT_ID" && test -n "$GOOGLE_CLIENT_SECRET" && test -n "$GOOGLE_REFRESH_TOKEN"
+          mkdir -p ~/.config/rclone
+          python3 - <<'PY'
+          import json,os,pathlib
+          p=pathlib.Path.home()/'.config/rclone/rclone.conf'
+          token=json.dumps({'access_token':'','token_type':'Bearer','refresh_token':os.environ['GOOGLE_REFRESH_TOKEN'],'expiry':'2000-01-01T00:00:00Z'})
+          p.write_text('[drive]\ntype = drive\nscope = drive\nclient_id = '+os.environ['GOOGLE_CLIENT_ID']+'\nclient_secret = '+os.environ['GOOGLE_CLIENT_SECRET']+'\ntoken = '+token+'\n')
+          p.chmod(0o600)
+          PY
+          rclone copyto Zoomania_4K_GPU_Test.mp4 "drive:Video Converter/Fertig/Zoomania_4K_GPU_Test.mp4" --progress --retries 5
