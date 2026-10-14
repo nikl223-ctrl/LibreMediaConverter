@@ -30,7 +30,7 @@ jobs:
         run: |
           set -euo pipefail
           test "${GOOGLE_CLIENT_ID%%-*}" = "160241343420"
-          t=$(curl -fsS -X POST --data-urlencode "client_id=$GOOGLE_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_REFRESH_TOKEN" --data-urlencode "grant_type=refresh_token" https://oauth2.googleapis.com/token)
+          t=$(curl -fsS --retry 10 --retry-all-errors --retry-delay 3 --retry-max-time 120 -X POST --data-urlencode "client_id=$GOOGLE_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_REFRESH_TOKEN" --data-urlencode "grant_type=refresh_token" https://oauth2.googleapis.com/token)
           a=$(jq -r '.access_token // empty' <<<"$t"); test -n "$a"; echo "::add-mask::$a"
           e=$(date -u -d '+3500 seconds' '+%Y-%m-%dT%H:%M:%SZ')
           j=$(jq -cn --arg a "$a" --arg r "$GOOGLE_REFRESH_TOKEN" --arg e "$e" '{access_token:$a,token_type:"Bearer",refresh_token:$r,expiry:$e}')
@@ -81,7 +81,7 @@ jobs:
         run: |
           set -euo pipefail
           test "${GOOGLE_CLIENT_ID%%-*}" = "160241343420"
-          t=$(curl -fsS -X POST --data-urlencode "client_id=$GOOGLE_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_REFRESH_TOKEN" --data-urlencode "grant_type=refresh_token" https://oauth2.googleapis.com/token)
+          t=$(curl -fsS --retry 10 --retry-all-errors --retry-delay 3 --retry-max-time 120 -X POST --data-urlencode "client_id=$GOOGLE_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_REFRESH_TOKEN" --data-urlencode "grant_type=refresh_token" https://oauth2.googleapis.com/token)
           a=$(jq -r '.access_token // empty' <<<"$t"); test -n "$a"; echo "::add-mask::$a"
           e=$(date -u -d '+3500 seconds' '+%Y-%m-%dT%H:%M:%SZ')
           j=$(jq -cn --arg a "$a" --arg r "$GOOGLE_REFRESH_TOKEN" --arg e "$e" '{access_token:$a,token_type:"Bearer",refresh_token:$r,expiry:$e}')
