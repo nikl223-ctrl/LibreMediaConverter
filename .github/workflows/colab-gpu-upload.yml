@@ -2,11 +2,17 @@ name: Upload Colab GPU result to Drive
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing Colab release tag
+        required: true
+        default: colab-gpu-20261014-103621
 permissions:
   contents: read
 jobs:
   upload:
-    if: startsWith(github.event.release.tag_name, 'colab-gpu-')
+    if: startsWith(github.event.release.tag_name || inputs.release_tag, 'colab-gpu-')
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -17,7 +23,7 @@ jobs:
       - name: Download segments from GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
         run: |
           mkdir -p segments
           gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D segments -p 'part_*.mp4'
