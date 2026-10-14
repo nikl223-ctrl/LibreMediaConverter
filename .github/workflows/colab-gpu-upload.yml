@@ -35,7 +35,13 @@ jobs:
           python3 - <<'PY'
           import json,os,pathlib
           p=pathlib.Path.home()/'.config/rclone/rclone.conf'
-          token=json.dumps({'access_token':'','token_type':'Bearer','refresh_token':os.environ['GOOGLE_REFRESH_TOKEN'],'expiry':'2000-01-01T00:00:00Z'})
+          import urllib.parse,urllib.request,datetime
+          params={'client_id':os.environ['GOOGLE_CLIENT_ID'],'client_secret':os.environ['GOOGLE_CLIENT_SECRET'],'refresh_token':os.environ['GOOGLE_REFRESH_TOKEN'],'grant_type':'refresh_token'}
+          req=urllib.request.Request('https://oauth2.googleapis.com/token',data=urllib.parse.urlencode(params).encode())
+          with urllib.request.urlopen(req,timeout=30) as response:
+              refreshed=json.load(response)
+          expiry=(datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(seconds=refreshed.get('expires_in',3600))).isoformat()
+          token=json.dumps({'access_token':refreshed['access_token'],'token_type':'Bearer','refresh_token':os.environ['GOOGLE_REFRESH_TOKEN'],'expiry':expiry})
           p.write_text('[drive]\ntype = drive\nscope = drive\nclient_id = '+os.environ['GOOGLE_CLIENT_ID']+'\nclient_secret = '+os.environ['GOOGLE_CLIENT_SECRET']+'\ntoken = '+token+'\n')
           p.chmod(0o600)
           PY
