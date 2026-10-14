@@ -1,0 +1,122 @@
+name: Colab 8K live stream to Google Drive
+on:
+  repository_dispatch:
+    types: [colab-8k-stream]
+permissions:
+  contents: read
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Install rclone
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq rclone
+      - name: Stream directly into Google Drive (no video files on runner)
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import datetime
+          import json
+          import os
+          import pathlib
+          import re
+          import subprocess
+          import tempfile
+          import time
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as fp:
+              payload = json.load(fp)["client_payload"]
+          url = payload["stream_url"]
+          key = payload["stream_key"]
+          filename = payload["target_name"]
+          parsed = urllib.parse.urlsplit(url)
+          if parsed.scheme != "https" or not parsed.hostname or not parsed.hostname.endswith(".trycloudflare.com"):
+              raise ValueError("Ungueltige Colab-Tunnel-URL")
+          if parsed.path != "/video" or parsed.query or parsed.fragment:
+              raise ValueError("Ungueltiger Streaming-Endpunkt")
+          if not isinstance(key, str) or len(key) < 32:
+              raise ValueError("Streaming-Schluessel ungueltig")
+          if not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}\.mkv", filename):
+              raise ValueError("Ausgabedateiname ungueltig")
+          required = ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN")
+          if not all(os.environ.get(item) for item in required):
+              raise RuntimeError("Google-Drive-Secrets fehlen")
+          params = urllib.parse.urlencode({
+              "client_id": os.environ["GOOGLE_CLIENT_ID"],
+              "client_secret": os.environ["GOOGLE_CLIENT_SECRET"],
+              "refresh_token": os.environ["GOOGLE_REFRESH_TOKEN"],
+              "grant_type": "refresh_token",
+          }).encode()
+          try:
+              request = urllib.request.Request("https://oauth2.googleapis.com/token", data=params)
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  refreshed = json.load(response)
+          except urllib.error.HTTPError as exc:
+              raise RuntimeError("Google OAuth konnte Token nicht aktualisieren (HTTP %s)" % exc.code) from None
+          expiry = (datetime.datetime.now(datetime.timezone.utc) +
+                    datetime.timedelta(seconds=refreshed.get("expires_in", 3600))).isoformat()
+          token = json.dumps({
+              "access_token": refreshed["access_token"],
+              "token_type": "Bearer",
+              "refresh_token": os.environ["GOOGLE_REFRESH_TOKEN"],
+              "expiry": expiry,
+          })
+          with tempfile.TemporaryDirectory(prefix="rclone-8k-") as temp:
+              config = pathlib.Path(temp) / "rclone.conf"
+              config.write_text(
+                  "[drive]\ntype = drive\nscope = drive\nclient_id = " +
+                  os.environ["GOOGLE_CLIENT_ID"] + "\nclient_secret = " +
+                  os.environ["GOOGLE_CLIENT_SECRET"] + "\ntoken = " + token + "\n",
+                  encoding="utf-8",
+              )
+              config.chmod(0o600)
+              env = os.environ.copy()
+              env["RCLONE_CONFIG"] = str(config)
+              folder = "drive:Video Converter/Fertig"
+              subprocess.run(["rclone", "mkdir", folder], check=True, env=env)
+              print("Drive ist bereit. Starte Live-Download von Colab und Streaming-Upload...", flush=True)
+              request = urllib.request.Request(
+                  url, headers={"X-Stream-Key": key, "Accept-Encoding": "identity"}
+              )
+              destination = folder + "/" + filename
+              started = time.monotonic()
+              received = 0
+              uploader = None
+              try:
+                  with urllib.request.urlopen(request, timeout=600) as stream:
+                      if stream.status != 200:
+                          raise RuntimeError("Colab HTTP-Status %s" % stream.status)
+                      uploader = subprocess.Popen(
+                          ["rclone", "rcat", destination, "--drive-chunk-size", "32M",
+                           "--streaming-upload-cutoff", "256K", "--stats", "30s", "-v"],
+                          stdin=subprocess.PIPE, env=env,
+                      )
+                      while True:
+                          data = stream.read(1024 * 1024)
+                          if not data:
+                              break
+                          uploader.stdin.write(data)
+                          received += len(data)
+                          if received // (512 * 1024 * 1024) > (received-len(data)) // (512 * 1024 * 1024):
+                              print("Live uebertragen: %.2f GiB" % (received / 1024**3), flush=True)
+                  uploader.stdin.close()
+                  rc = uploader.wait()
+                  if rc:
+                      raise RuntimeError("rclone rcat fehlgeschlagen: %d" % rc)
+              except BaseException:
+                  if uploader is not None and uploader.poll() is None:
+                      uploader.kill()
+                      uploader.wait()
+                  raise
+              print("8K-Film direkt auf Google Drive gespeichert: %s (%.2f GiB, %.0f s)" %
+                    (filename, received / 1024**3, time.monotonic() - started), flush=True)
+          PY
