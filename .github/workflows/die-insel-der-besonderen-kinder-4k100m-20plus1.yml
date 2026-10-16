@@ -86,11 +86,46 @@ jobs:
           e=$(date -u -d '+3500 seconds' '+%Y-%m-%dT%H:%M:%SZ')
           j=$(jq -cn --arg a "$a" --arg r "$GOOGLE_REFRESH_TOKEN" --arg e "$e" '{access_token:$a,token_type:"Bearer",refresh_token:$r,expiry:$e}')
           rclone config create drive drive client_id "$GOOGLE_CLIENT_ID" client_secret "$GOOGLE_CLIENT_SECRET" scope drive token "$j" --non-interactive >/dev/null
-      - name: Fetch 20 encoded shards
-        uses: actions/download-artifact@v4
-        with:
-          pattern: inselbesonderekinder4k100m-part-*
-          path: /tmp/parts
+      - name: Fetch 20 encoded shards with retries
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/parts
+          for p in $(seq 0 19); do
+            name="inselbesonderekinder4k100m-part-$p"
+            dest="/tmp/parts/$name"
+            ok=0
+            for attempt in $(seq 1 10); do
+              echo "Downloading $name (attempt $attempt/10)"
+              rm -rf "$dest" "/tmp/$name.zip"
+              mkdir -p "$dest"
+              aid=$(curl -fsS --retry 5 --retry-all-errors \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/$REPO/actions/runs/$RUN_ID/artifacts?name=$name" \
+                | jq -r '.artifacts[0].id // empty') || true
+              if [ -n "$aid" ] && \
+                 curl -fL --retry 10 --retry-all-errors --retry-delay 5 --retry-max-time 900 \
+                   -H "Authorization: Bearer $GH_TOKEN" \
+                   -H "Accept: application/vnd.github+json" \
+                   "https://api.github.com/repos/$REPO/actions/artifacts/$aid/zip" \
+                   -o "/tmp/$name.zip" && \
+                 unzip -t "/tmp/$name.zip" >/dev/null && \
+                 unzip -q "/tmp/$name.zip" -d "$dest" && \
+                 find "$dest" -name '*.mp4' -type f -size +1M | grep -q .; then
+                rm -f "/tmp/$name.zip"
+                ok=1
+                break
+              fi
+              echo "Retrying $name after failed download/extract..."
+              sleep $((attempt * 10))
+            done
+            test "$ok" -eq 1
+          done
+          test "$(find /tmp/parts -name '*.mp4' -type f | wc -l)" -eq 20
       - name: Assemble and upload final file directly
         run: |
           set -euo pipefail
