@@ -67,6 +67,41 @@ try:
             'server_video_frames':0,
             'client_renderer':display,
         })
+        # Remote CPU physics + local GPU path on an actual browser.
+        # There is no native Steam game, no remote GPU attachment and no video.
+        remote_page=browser.new_page(viewport={'width':1150,'height':720})
+        remote_errors=[]
+        remote_page.on('pageerror',lambda error:remote_errors.append(str(error)))
+        remote_page.goto('http://127.0.0.1:18766/?remote=1',
+                         wait_until='domcontentloaded',timeout=20000)
+        assert remote_page.locator('#remote-mode').is_checked()
+        remote_page.get_by_role('button',name='Spielen – auf diesem Gerät').click()
+        remote_page.locator('#intro').wait_for(state='hidden',timeout=30000)
+        remote_page.wait_for_timeout(1000)
+        before=remote_page.request.get('http://127.0.0.1:18766/api/stats').json()
+        remote_page.wait_for_timeout(1400)
+        after=remote_page.request.get('http://127.0.0.1:18766/api/stats').json()
+        render_mode=remote_page.locator('#renderer').inner_text()
+        assert any(x in render_mode for x in ('WebGL2','WebGPU','Canvas2D')),render_mode
+        assert 'CPU-Server' in remote_page.locator('#server').inner_text(),remote_page.locator('#server').inner_text()
+        assert after['remote_steps']>before['remote_steps'],{'before':before,'after':after}
+        remote_steps=after['remote_steps']-before['remote_steps']
+        remote_bytes=after['response_bytes']-before['response_bytes']
+        remote_inputs=after['remote_request_bytes']-before['remote_request_bytes']
+        assert 0<remote_bytes<40000,{'delta_bytes':remote_bytes,'steps':remote_steps}
+        assert 0<remote_inputs<10000,{'delta_inputs':remote_inputs,'steps':remote_steps}
+        assert not remote_errors,remote_errors
+        print('REMOTE_CPU_LOCAL_GPU_PROOF',{
+            'renderer':render_mode,'remote_cpu_steps':remote_steps,
+            'response_bytes_per_window':remote_bytes,
+            'control_payload_bytes_per_window':remote_inputs,
+            'measured_window_seconds':1.4,
+            'server_video_frames':0,
+            'note':'HTTP payload only; TCP/TLS/headers not included'
+        })
+        remote_page.screenshot(path=str(ROOT/'remote-browser-smoke.png'))
+        remote_page.get_by_role('button',name='Spiel beenden und speichern').click()
+        remote_page.locator('#intro').wait_for(state='visible',timeout=10000)
         browser.close()
 finally:
     proc.terminate()
