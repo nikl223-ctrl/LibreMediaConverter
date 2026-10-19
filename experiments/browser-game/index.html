@@ -13,7 +13,7 @@
     <section class="hero">
       <p class="eyebrow">Experiment: Client-Side Rendering</p>
       <h1>Das Spiel rendert bei dir.</h1>
-      <p>Dieser Server liefert nur den Code und die Welt. Dein Browser berechnet die Fahrt und zeichnet alles mit WebGPU oder WebGL2.</p>
+      <p>Dieser Server liefert nur den Code und die Welt. Dein Browser berechnet die Fahrt und zeichnet alles mit WebGPU oder WebGL2. Die Webseite meldet verfügbare Browser-Grafikschnittstellen an den Server; sie kann nicht zuverlässig die physische GPU identifizieren.</p>
     </section>
     <section id="play-area">
       <canvas id="game" aria-label="3D-Fahrsimulation" tabindex="0"></canvas>
@@ -25,9 +25,13 @@
       <div><small>Server</small><strong id="server">Prüfung läuft …</strong></div>
       <div><small>Grafik</small><strong id="gpu">Wird erkannt</strong></div>
       <div><small>Leveldaten</small><strong id="loaded">Noch nicht geladen</strong></div>
+      <div><small>Client-Prüfung</small><strong id="device-info">Grafikschnittstellen werden erkannt …</strong></div>
+      <div><small>Netzwerk – geschätzt</small><strong id="network">0 KiB übertragen</strong></div>
+      <div><small>Spielstand</small><strong id="save-status">Noch nicht geladen</strong></div>
     </section>
+    <div class="actions"><button id="save-now" type="button" disabled>Spielstand auf Server speichern</button><button id="quit" type="button" disabled>Spiel beenden und speichern</button></div>
     <details><summary>Was wird hier tatsächlich bewiesen?</summary>
-      <p>Eine Webseite kann Dateien dynamisch von einem GPU-losen Server laden und die Grafik auf PC/Xbox/Mobilgerät selbst rendern, sofern die jeweilige Browser-Grafik-API verfügbar ist. Dieses Demo enthält **kein** ETS/ATS und keine Windows-Spiel-EXE. Native Spiele brauchen eine Browser-Portierung ihrer Engine.</p>
+      <p>Eine Webseite kann Dateien dynamisch von einem GPU-losen Server laden und die Grafik auf PC/Xbox/Mobilgerät selbst rendern, sofern die jeweilige Browser-Grafik-API verfügbar ist. Die Spieldaten sind im HTTP-Browsercache gespeichert, und der Spielstand wird separat auf dem Server gesichert. Dieses Demo enthält **kein** ETS/ATS und keine Windows-Spiel-EXE. Native Spiele brauchen eine Browser-Portierung ihrer Engine.</p>
     </details>
   </main>
   <footer>Browser-Engine-Prototyp · keine Steam-, SCS- oder Xbox-Anmeldung erforderlich</footer>
