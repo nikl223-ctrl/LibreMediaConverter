@@ -12,10 +12,18 @@ const serverText = document.querySelector('#server');
 const deviceText = document.querySelector('#device-info');
 const networkText = document.querySelector('#network');
 const saveText = document.querySelector('#save-status');
+const remoteCheckbox = document.querySelector('#remote-mode');
+remoteCheckbox.checked = new URLSearchParams(location.search).get('remote') === '1';
 const saveButton = document.querySelector('#save-now');
 const quitButton = document.querySelector('#quit');
 let sessionToken = null;
 let isSaving = false;
+let remoteMode = false;
+let remotePending = false;
+let remoteLastRequest = 0;
+let remoteTarget = null;
+let remoteFailures = 0;
+let remoteReplies = 0;
 let renderer = null;
 let world = null;
 let isRunning = false;
@@ -290,12 +298,51 @@ function createWebGLRenderer(){
     gl.uniformMatrix4fv(matrixLocation,false,vp);gl.drawArrays(gl.TRIANGLES,0,mesh.length/6);
   }};
 }
+async function remoteStep(steer, gas, brake) {
+  if (remotePending || !sessionToken) return;
+  remotePending = true;
+  try {
+    const reply = await fetch('/api/remote/step', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json','X-Game-Session': sessionToken},
+      body: JSON.stringify({steer: Math.max(-1,Math.min(1,steer)),gas:!!gas,brake:!!brake}),
+      cache: 'no-store'
+    });
+    if (!reply.ok) throw new Error('HTTP '+reply.status);
+    const state = await reply.json();
+    if (!['x','z','velocity','distance'].every(k=>Number.isFinite(state[k]))) throw new Error('ungültiger Simulationszustand');
+    remoteTarget = state;
+    remoteReplies++;
+  } catch (error) {
+    remoteFailures++;
+    if (remoteFailures < 4) serverText.textContent = 'Remote-Simulation unterbrochen: '+error.message;
+  } finally {
+    remotePending = false;
+  }
+}
 function controls(dt){
   const pad=navigator.getGamepads?.().find(p=>p?.connected);
   const axis=pad?.axes?.[0]??0;
   const steer=(keys.has('a')||keys.has('arrowleft')||touches.left ?-1:0)+(keys.has('d')||keys.has('arrowright')||touches.right?1:0)+axis;
   const gas=keys.has('w')||keys.has('arrowup')||touches.gas||((pad?.buttons?.[7]?.value??0)>.1);
   const brake=keys.has('s')||keys.has('arrowdown')||touches.brake||((pad?.buttons?.[6]?.value??0)>.1);
+  if (remoteMode) {
+    const now = performance.now();
+    if (now - remoteLastRequest >= 100) {
+      remoteLastRequest = now;
+      remoteStep(steer,gas,brake);
+    }
+    // Smoothly interpolate authoritative CPU-server positions using the
+    // browser's own CPU/GPU; this is not video streaming or remote GPU access.
+    if (remoteTarget) {
+      const alpha=Math.min(1,dt*14);
+      vehicle.x+=(remoteTarget.x-vehicle.x)*alpha;
+      vehicle.z+=(remoteTarget.z-vehicle.z)*alpha;
+      vehicle.velocity=remoteTarget.velocity;
+      vehicle.distance=remoteTarget.distance;
+    }
+    return;
+  }
   const maxSpeed=world.vehicle.maxSpeedKmh/3.6;
   vehicle.velocity=Math.max(0,Math.min(maxSpeed,vehicle.velocity+(gas?world.vehicle.acceleration*dt:0)-(brake?world.vehicle.braking*dt:0)-.4*dt));
   vehicle.x=Math.max(-world.track.roadWidth/2+1.2,Math.min(world.track.roadWidth/2-1.2,vehicle.x+steer*vehicle.velocity*.30*dt));
@@ -327,6 +374,12 @@ async function start(){
     gpuStatus.textContent='Grafik: '+renderer.type+' auf diesem Gerät';status.textContent=renderer.type+' (lokal)';
     try { await ensureSession(); }
     catch (error) { saveText.textContent='Server-Spielstand nicht verfügbar: '+error.message; }
+    remoteMode = remoteCheckbox.checked && !!sessionToken;
+    remoteTarget = null;
+    remoteLastRequest = 0;
+    remoteFailures = 0;
+    remoteReplies = 0;
+    if (remoteMode) serverText.textContent='CPU-Server: 10 Zustände/s · GPU ausschließlich im Browser';
     intro.hidden=true;intro.style.display='none';canvas.focus();isRunning=true;last=performance.now();requestAnimationFrame(frame);
     refreshNetwork();
   }catch(error){console.error(error);startButton.disabled=false;startButton.textContent='Nochmal versuchen';loadText.textContent=error.message;}
@@ -337,6 +390,8 @@ quitButton.addEventListener('click',async()=>{
   isRunning = false;
   await saveGame();
   intro.hidden = false; intro.style.display = 'flex';
+  remoteMode = false;
+  remotePending = false;
   startButton.disabled = false;
   startButton.textContent = '▶ Weiterfahren – auf diesem Gerät';
   saveButton.disabled = true; quitButton.disabled = true;
