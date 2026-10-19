@@ -96,7 +96,8 @@ def inspect_archive(member, source, count):
     # HashFS needs an SCS-aware unpacker; do not guess at its entries.
     elif entry["format"] == "SCS HashFS":
         entry["note"] = "HashFS archive: SCS-aware extractor needed for internal definitions"
-    target.unlink(missing_ok=True)
+    if entry['format'] == 'zip':
+        target.unlink(missing_ok=True)
 
 
 def main():
