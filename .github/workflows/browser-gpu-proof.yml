@@ -18,6 +18,20 @@ jobs:
           python-version: '3.11'
       - name: Validate GPU-free server, lazy assets and HTTP ranges
         run: python3 -m unittest discover -s experiments/browser-game/tests -v
+      - name: Build and run Linux CPU-only container
+        shell: bash
+        run: |
+          docker compose -f experiments/browser-game/compose.yaml config --quiet
+          docker build -t browsergame-cpu-proof experiments/browser-game
+          docker run -d --rm --name browsergame-ci -p 127.0.0.1:18768:8765 browsergame-cpu-proof
+          trap 'docker logs browsergame-ci; docker stop browsergame-ci' EXIT
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:18768/health > /tmp/browsergame-health.json; then break; fi
+            sleep 1
+          done
+          grep -q '"server_gpu":false' /tmp/browsergame-health.json
+          curl --fail --silent http://127.0.0.1:18768/api/world > /tmp/browsergame-world.json
+          python3 -m json.tool /tmp/browsergame-world.json >/dev/null
       - name: Install browser test tools
         run: |
           python3 -m pip install playwright
