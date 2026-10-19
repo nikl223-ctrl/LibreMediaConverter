@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Sunshine launches this per app on the authorized remote compute host.
+set -euo pipefail
+umask 077
+
+case "${1:-}" in
+  geforce-now)
+    app_name="GeForce NOW"
+    url="https://play.geforcenow.com/"
+    profile_name="geforce-now"
+    ;;
+  xbox-cloud)
+    app_name="Xbox Cloud Gaming"
+    url="https://www.xbox.com/play"
+    profile_name="xbox-cloud"
+    ;;
+  *)
+    echo "Usage: cloudgaming-app {geforce-now|xbox-cloud} [--dry-run]" >&2
+    exit 2
+    ;;
+esac
+
+profile_base="$HOME/.local/share/cloudgaming"
+profile="$profile_base/$profile_name"
+if [[ "${2:-}" == "--dry-run" ]]; then
+  echo "App: $app_name"
+  echo "URL: $url"
+  echo "Profile: $profile"
+  echo "Duration limit: 21600 seconds (starts when app selected)"
+  exit 0
+fi
+browser=""
+for candidate in chromium chromium-browser google-chrome-stable google-chrome; do
+  if command -v "$candidate" >/dev/null 2>&1; then
+    browser="$(command -v "$candidate")"
+    break
+  fi
+done
+if [[ -z "$browser" ]]; then
+  echo "No Chrome/Chromium installed on the compute host" >&2
+  exit 3
+fi
+mkdir -p "$profile"
+chmod 700 "$profile_base" "$profile"
+
+echo "Launching $app_name on the REMOTE compute host; 6h limit"
+setsid timeout --signal=TERM --kill-after=10s 21600 \
+  "$browser" --user-data-dir="$profile" \
+  --no-first-run --disable-background-mode --start-maximized --new-window "$url" &
+pid=$!
+
+cleanup() {
+  trap - EXIT INT TERM HUP
+  if kill -0 "$pid" 2>/dev/null; then
+    pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
+    if [[ "$pgid" == "$pid" ]]; then
+      kill -TERM -- "-$pid" 2>/dev/null || true
+    else
+      kill -TERM "$pid" 2>/dev/null || true
+    fi
+  fi
+  wait "$pid" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM HUP
+set +e
+wait "$pid"
+status=$?
+set -e
+exit "$status"
