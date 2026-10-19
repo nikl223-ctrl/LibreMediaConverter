@@ -1,0 +1,6 @@
+# Do not commit server credentials, saved games or cached Google Drive levels.
+.env
+.runtime/
+__pycache__/
+*.pyc
+browser-smoke.png
