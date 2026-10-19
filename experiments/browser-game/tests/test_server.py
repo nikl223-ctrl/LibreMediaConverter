@@ -76,6 +76,24 @@ class AssetServerTests(unittest.TestCase):
         self.assertFalse(val["server_gpu"])
         self.assertFalse(val["native_steam_supported"])
 
+    def test_drive_cache_is_persistent_on_server_disk(self):
+        # Exercise the real file cache without contacting Drive or OAuth.
+        import tempfile
+        sys.path.insert(0,str(ROOT))
+        import low_bandwidth
+        with tempfile.TemporaryDirectory() as folder:
+            previous=low_bandwidth.CACHE_ROOT
+            try:
+                low_bandwidth.CACHE_ROOT=Path(folder)
+                file_id='safe-test-world-demo-1234'
+                level=(ROOT/'assets'/'world.json').read_bytes()
+                low_bandwidth.save_level_cache(file_id,level)
+                self.assertEqual(low_bandwidth.cached_level(file_id,600),level)
+                self.assertIsNone(low_bandwidth.cached_level(file_id,-1))
+                self.assertEqual(len(list(Path(folder).glob('*.json'))),1)
+            finally:
+                low_bandwidth.CACHE_ROOT=previous
+
     def test_server_game_save_roundtrip(self):
         code,_,raw=self.post('/api/session')
         self.assertEqual(code,200)
