@@ -1,0 +1,33 @@
+name: ATS Ford Physics Report
+on:
+  workflow_run:
+    workflows: ["ATS Ford Physics Analysis"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Scan run ID to summarize
+        required: false
+        default: '39286926165'
+permissions:
+  actions: read
+  contents: read
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download finished scan artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id || inputs.run_id || '39286926165' }}
+        run: gh run download "$RUN_ID" -R "$GH_REPO" -D downloaded
+      - name: Print Ford DLC findings into readable GitHub logs
+        run: python3 tools/ats_ford_merge.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ats-ford-physics-report
+          path: ats-ford-physics-report.json
+          retention-days: 7
