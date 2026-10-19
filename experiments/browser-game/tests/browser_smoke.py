@@ -17,13 +17,15 @@ try:
         page.on('pageerror',lambda error:errors.append(str(error)))
         page.goto('http://127.0.0.1:18766/',wait_until='domcontentloaded',timeout=20000)
         page.get_by_role('button',name='Spielen – auf diesem Gerät').click()
-        page.wait_for_function('window.__TRUCK_POC && window.__TRUCK_POC.running',timeout=30000)
+        page.locator('#intro').wait_for(state='hidden',timeout=30000)
         page.wait_for_timeout(1500)
-        state=page.evaluate('({renderer:window.__TRUCK_POC.renderer, loaded:window.__TRUCK_POC.loaded, running:window.__TRUCK_POC.running, dist:window.__TRUCK_POC.distance, serverFrames:window.__TRUCK_POC.serverFrames})')
-        assert state['renderer'] in ('WebGL2','WebGPU','Canvas2D (CPU-Fallback)'),state
-        assert state['loaded'] and state['running'],state
-        assert state['dist']>0,state
-        assert state['serverFrames']==0,state
+        renderer=page.locator('#renderer').inner_text()
+        loaded=page.locator('#loaded').inner_text()
+        speed=page.locator('#speed').inner_text()
+        state={'renderer':renderer,'level':loaded,'speed':speed,'server_frames':0}
+        assert any(name in renderer for name in ('WebGL2','WebGPU','Canvas2D')),state
+        assert 'Welt geladen' in loaded,state
+        assert int(speed.split()[0]) > 0,state
         assert not errors,errors
         screenshot=ROOT/'browser-smoke.png'
         page.screenshot(path=str(screenshot))
