@@ -1,0 +1,50 @@
+name: ATS Ford DLC physics extraction
+on:
+  push:
+    paths:
+      - .github/workflows/ats-ford-extract.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  extract:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install authenticated Google Drive client
+        run: python -m pip install google-auth requests
+      - name: Download just Ford DLC and def SCS from ATS TAR
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        run: python tools/ats_ford_fetch_targets.py
+      - name: Download official SCS game archive extractor
+        shell: pwsh
+        run: |
+          Invoke-WebRequest 'https://download.eurotrucksimulator2.com/scs_extractor_1_55.zip' -OutFile scs_extractor.zip
+          Expand-Archive scs_extractor.zip -DestinationPath scs-tools
+      - name: Extract vehicle definitions locally
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path scs-tools -Recurse -Filter 'scs_extractor*.exe' | Select-Object -First 1
+          if (-not $exe) { throw "SCS extractor not found in official package" }
+          New-Item -ItemType Directory -Force extracted/ford,extracted/def | Out-Null
+          & $exe.FullName "$PWD/game-assets/ford.scs" "$PWD/extracted/ford"
+          if ($LASTEXITCODE -ne 0) { throw "Ford DLC extraction failed: $LASTEXITCODE" }
+          & $exe.FullName "$PWD/game-assets/def.scs" "$PWD/extracted/def"
+          if ($LASTEXITCODE -ne 0) { throw "def.scs extraction failed: $LASTEXITCODE" }
+      - name: Create readable physics report
+        run: python tools/ats_ford_extract_report.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ats-ford-extracted-physics-metadata
+          path: |
+            target-metadata.json
+            ats-ford-extracted-report.json
+          retention-days: 7
