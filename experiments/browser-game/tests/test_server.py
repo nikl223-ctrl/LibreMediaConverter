@@ -62,6 +62,55 @@ class AssetServerTests(unittest.TestCase):
                     self.get(path)
                 self.assertEqual(ctx.exception.code,404)
 
+    def post(self,path,data=b"",headers=None):
+        req=urllib.request.Request(BASE+path,data=data,headers=headers or {},method='POST')
+        with urllib.request.urlopen(req,timeout=5) as response:
+            return response.status,response.headers,response.read()
+
+    def test_gpu_capabilities_are_reported_without_server_gpu(self):
+        body=json.dumps({"webgpu":False,"webgl2":True}).encode()
+        code,_,raw=self.post('/api/client',body,{"Content-Type":"application/json"})
+        self.assertEqual(code,200)
+        val=json.loads(raw)
+        self.assertEqual(val["render_mode"],"WebGL2")
+        self.assertFalse(val["server_gpu"])
+        self.assertFalse(val["native_steam_supported"])
+
+    def test_server_game_save_roundtrip(self):
+        code,_,raw=self.post('/api/session')
+        self.assertEqual(code,200)
+        token=json.loads(raw)['token']
+        auth={"Authorization":"Bearer "+token}
+        state={"x":1.25,"z":333.5,"velocity":10.0,"distance":318.3}
+        status,_,raw=self.post('/api/save',json.dumps(state).encode(),auth)
+        self.assertEqual(status,200)
+        status,_,raw=self.get('/api/save',auth)
+        self.assertEqual(status,200)
+        self.assertEqual(json.loads(raw),state)
+        # The save stays on the CPU-only server filesystem.
+        self.assertTrue(any((ROOT/'.runtime'/'saves').glob('*.json')))
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self.get('/api/save',{"Authorization":"Bearer unknown"})
+        self.assertEqual(ctx.exception.code,401)
+
+    def test_dangerous_save_payload_is_rejected(self):
+        _,_,raw=self.post('/api/session')
+        token=json.loads(raw)['token']
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self.post('/api/save',b'{"x":"../../private","z":0,"velocity":0,"distance":0}',
+                      {"Authorization":"Bearer "+token})
+        self.assertEqual(ctx.exception.code,400)
+
+    def test_asset_etag_and_browser_cache(self):
+        code,h,raw=self.get('/game.js')
+        self.assertEqual(code,200)
+        self.assertIn('max-age=',h['Cache-Control'])
+        etag=h['ETag']
+        req=urllib.request.Request(BASE+'/game.js',headers={"If-None-Match":etag})
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req,timeout=5)
+        self.assertEqual(ctx.exception.code,304)
+
     def test_html_assets(self):
         status,_,raw=self.get('/')
         self.assertEqual(status,200)
