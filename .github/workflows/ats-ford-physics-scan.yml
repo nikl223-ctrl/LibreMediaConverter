@@ -1,0 +1,32 @@
+name: ATS Ford Physics Analysis
+on:
+  push:
+    paths:
+      - .github/workflows/ats-ford-physics-scan.yml
+  workflow_dispatch:
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        worker: [0,1,2,3,4,5,6,7,8,9]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Drive dependencies
+        run: pip install google-auth requests
+      - name: Index ATS archive section
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          ATS_WORKER: ${{ matrix.worker }}
+          ATS_WORKERS: 10
+        run: python tools/ats_ford_archive_index.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ats-archive-worker-${{ matrix.worker }}
+          path: ats-reports/*.json
+          retention-days: 7
