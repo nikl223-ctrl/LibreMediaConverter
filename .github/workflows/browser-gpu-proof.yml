@@ -22,9 +22,8 @@ jobs:
         shell: bash
         run: |
           docker compose -f experiments/browser-game/compose.yaml config --quiet
-          docker build -t browsergame-cpu-proof experiments/browser-game
-          docker run -d --rm --name browsergame-ci -p 127.0.0.1:18768:8765 browsergame-cpu-proof
-          trap 'docker logs browsergame-ci; docker stop browsergame-ci' EXIT
+          BIND_PORT=18768 docker compose -f experiments/browser-game/compose.yaml up -d --build
+          trap 'BIND_PORT=18768 docker compose -f experiments/browser-game/compose.yaml logs --tail 25; BIND_PORT=18768 docker compose -f experiments/browser-game/compose.yaml down' EXIT
           for i in {1..30}; do
             if curl --fail --silent http://127.0.0.1:18768/health > /tmp/browsergame-health.json; then break; fi
             sleep 1
