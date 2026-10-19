@@ -33,7 +33,7 @@ try:
         assert 'KiB' in page.locator('#network').inner_text()
         initial=page.request.get('http://127.0.0.1:18766/api/stats').json()['response_bytes']
         page.get_by_role('button',name='Spielstand auf Server speichern').click()
-        assert 'gespeichert' in page.locator('#save-status').inner_text()
+        page.get_by_text('Spielstand auf Server gespeichert',exact=True).wait_for(timeout=10000)
         page.reload(wait_until='domcontentloaded')
         page.get_by_role('button',name='Spielen – auf diesem Gerät').click()
         page.locator('#intro').wait_for(state='hidden',timeout=30000)
