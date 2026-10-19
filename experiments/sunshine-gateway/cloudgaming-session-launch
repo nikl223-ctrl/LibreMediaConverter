@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Launch only on an authorized compute host with a running graphical session.
+set -euo pipefail
+umask 077
+
+if ! command -v sunshine >/dev/null 2>&1; then
+  echo "Sunshine must already be installed and configured on the compute host" >&2
+  exit 3
+fi
+
+browser=""
+for candidate in chromium chromium-browser google-chrome-stable google-chrome; do
+  if command -v "$candidate" >/dev/null 2>&1; then
+    browser="$candidate"
+    break
+  fi
+done
+if [[ -z "$browser" ]]; then
+  echo "Install Chromium or Chrome on the authorized compute host" >&2
+  exit 3
+fi
+
+url="$""{CLOUDGAMING_URL:-https://play.geforcenow.com/}"
+case "$url" in
+  https://play.geforcenow.com/*|https://www.xbox.com/play*|https://www.xbox.com/*) ;;
+  *) echo "Set CLOUDGAMING_URL to an approved HTTPS service" >&2; exit 2 ;;
+esac
+
+# Persistent disk is on compute host. It is never uploaded to GitHub.
+profile="$HOME/.local/share/cloudgaming/chromium-profile"
+mkdir -p "$profile"
+chmod 700 "$HOME/.local/share/cloudgaming" "$profile"
+echo "Starting Sunshine and browser. Saved browser profile retained at $profile"
+sunshine &
+sunshine_pid=$!
+"$browser" --user-data-dir="$profile" --no-first-run --new-window "$url" &
+browser_pid=$!
+
+cleanup() {
+  trap - TERM INT EXIT
+  kill "$browser_pid" "$sunshine_pid" 2>/dev/null || true
+  wait "$browser_pid" "$sunshine_pid" 2>/dev/null || true
+}
+trap cleanup TERM INT EXIT
+# Stop the entire session when either the browser or Sunshine exits.
+wait -n "$sunshine_pid" "$browser_pid" || true
+echo "Browser or Sunshine exited; stopping remote session"
