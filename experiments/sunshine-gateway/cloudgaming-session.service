@@ -1,0 +1,20 @@
+[Unit]
+Description=Temporary cloud gaming browser and Sunshine session
+Documentation=https://github.com/LizardByte/Sunshine
+After=graphical-session.target
+Wants=graphical-session.target
+
+[Service]
+Type=exec
+ExecStart=%h/.local/bin/cloudgaming-session-launch
+RuntimeMaxSec=6h
+Restart=no
+TimeoutStopSec=25s
+KillMode=control-group
+# Adjust to the actual X11/Wayland session: this example assumes X11 :0.
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=%h/.Xauthority
+# The login profile and Sunshine pairing keys intentionally persist across sessions.
+
+[Install]
+WantedBy=default.target
