@@ -200,6 +200,35 @@ Die nativen Steam-/ETS-/ATS-Dateien sind kein Browser-Spiel: Auch bei einem
 funktionierenden Xbox-WebGL2-Test sind diese Titel dadurch nicht direkt
 spielbar. Die tatsächliche Xbox-Unterstützung muss am Gerät geprüft werden.
 
+## Experiment: Linux-CPU berechnet die Spielwelt, Browser-GPU zeichnet sie
+
+Auf der Webseite vor „Spielen“ die Option **„Simulation auf Linux-CPU
+ausführen“** auswählen, oder die Adresse `/?remote=1` öffnen. Dann gilt:
+
+- Der Linux-Server berechnet das Fahren auf seiner CPU.
+- Die Webseite sendet etwa 10-mal pro Sekunde nur Lenken, Gas und Bremse
+  an `POST /api/remote/step`.
+- Der Server schickt nur Positions- und Geschwindigkeitswerte zurück.
+- Die Geometrie der Welt bleibt im Browser und wird mit WebGPU bzw. WebGL2
+  dargestellt; **der Server erzeugt keine Videobilder**.
+- Aus Sicherheitsgründen ist das Protokoll eine Demo mit einer anonymen
+  Sitzung, keine authentifizierte Steam-Sitzung und keine echte Remote-GPU.
+
+**GitHub-Test #39304839590:** 11/11 Serverprüfungen bestanden; echter
+Chromium-Browser verwendete WebGL2; die 16 CPU-Fahrwerksschritte brauchten
+insgesamt 592 Bytes Eingabe-Nutzdaten (37 Bytes pro Schritt).
+Hinzu kommen Antworten, HTTP-Protokoll-Overhead und anfängliche Spieldaten.
+Diese Messung ist kein Ersatz für einen echten Internet-Bandbreitentest
+zwischen deinem Server und deiner Xbox. Sie zeigt nur, dass die Remote-
+CPU-Architektur für eine kleine, selbst programmierte Simulation funktioniert.
+
+**Grenze:** Die Grafik-API bleibt eine lokale Browser-API. Diese Demo ist
+keine Übersetzung von Steam, DirectX/Vulkan oder geschützten Windows-
+Spielen nach WebGPU. Ohne Zugriff auf die Engine und eine passende
+Browser-Portierung kann ETS2/ATS nicht auf diese Weise im Xbox-Browser
+laufen. Auch Steam-Cloud-Saves sind nicht enthalten; das Programm nutzt
+eigene Spielstand-Dateien auf dem Linux-Server.
+
 ## Tests
 
 ```bash
