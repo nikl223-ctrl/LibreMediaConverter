@@ -1,10 +1,12 @@
 # Ein-Befehl-Cloud-Gaming: Sunshine + Moonlight
 
+**AKTUALISIERT:** Für feste Gateway-IP, zwei Moonlight-Kacheln und App-Laufzeit siehe zuerst [MOONLIGHT-2-APPS-DE.md](MOONLIGHT-2-APPS-DE.md). Diese Anleitung enthält die zugrunde liegenden SSH-/WireGuard-Schritte.
+
 ## Zweck und ehrliche Grenzen
 
 Der alte Linux-Server (1 vCPU / 2 GiB RAM) behält die bisherige Moonlight-Einstiegsadresse und leitet Daten im Kernel per WireGuard/nftables weiter. Ein autorisierter stärkerer Linux-Rechner betreibt die **gesamte** Grafik-Session: Chromium + GeForce NOW/Xbox Cloud Gaming + Sunshine. Die CPU/RAM-Ausstattung der alten VM wird NICHT erweitert. Der Gateway-Server muss Netzwerkverkehr und ggf. WireGuard-Verschlüsselung verarbeiten; damit ist seine Last klein, aber nicht null.
 
-Ein Startbefehl auf dem alten Server reicht **nach einmaliger Installation**. Nach 6 Stunden stoppt systemd die Sitzung; der starke Rechner selbst wird dadurch **nicht** beim Cloud-Anbieter gelöscht. Dafür ist dessen Verwaltungs-API erforderlich.
+Ein Startbefehl auf dem alten Server aktiviert Sunshine **nach einmaliger Installation**. Die Browser-Anwendung wird erst bei der Auswahl in Moonlight gestartet. Nach jeweils bis zu 6 Stunden beendet sich der ausgewählte Browserprozess; Sunshine kann für die nächste App-Auswahl weiterlaufen. Der starke Rechner selbst wird dadurch **nicht** beim Cloud-Anbieter gelöscht. Dafür wäre dessen Verwaltungs-API erforderlich.
 
 GitHub Actions dient ausschließlich Software-Tests. Verwende einen tatsächlich verfügbaren, von dir autorisierten externen Rechner.
 
@@ -28,6 +30,7 @@ git clone --branch experiment/sunshine-gateway-20261019 --single-branch \
 cd "$HOME/cloudgaming-tools/experiments/sunshine-gateway"
 mkdir -p "$HOME/.local/bin" "$HOME/.config/systemd/user"
 install -m 755 cloudgaming-session-launch "$HOME/.local/bin/cloudgaming-session-launch"
+install -m 755 cloudgaming-app "$HOME/.local/bin/cloudgaming-app"
 install -m 644 cloudgaming-session.service "$HOME/.config/systemd/user/cloudgaming-session.service"
 systemctl --user daemon-reload
 # Dies startet noch KEIN Spiel. Unit absichtlich nicht dauerhaft 'enable'-n.
@@ -72,9 +75,9 @@ python3 cloudgamingctl.py logs
 python3 cloudgamingctl.py stop
 ```
 
-Der starke Rechner startet Sunshine und den Browser in seiner vorhandenen grafischen Sitzung. Die Unit begrenzt **jede** Sitzung mit `RuntimeMaxSec=6h`. Erneutes `start` nach Ablauf erzeugt eine neue Sitzung; keine GitHub-Worker-Rotation oder Umgehung von Nutzungsbeschränkungen.
+Der starke Rechner startet Sunshine in seiner vorhandenen grafischen Sitzung. Die App-Auswahl in Moonlight startet jeweils den gewünschten Browser. Der jeweilige Browserprozess ist auf **bis zu sechs Stunden ab seiner App-Auswahl** begrenzt; beim Wechsel startet ein neuer Prozess mit neuem Zeitfenster. Sunshine bleibt für Moonlight sichtbar, solange sein Dienst läuft; keine GitHub-Worker-Rotation oder Umgehung von Nutzungsbeschränkungen.
 
-Browserprofil: `~/.local/share/cloudgaming/chromium-profile` auf dem starken Host. Sunshine-Keys: `~/.config/sunshine`. Beide werden nicht gelöscht. Diese Persistenz bedeutet ausdrücklich, dass bei einem Hostwechsel ohne gemeinsamen verschlüsselten Speicher **keine** nahtlose Sitzung garantiert werden kann.
+Browserprofile: `~/.local/share/cloudgaming/geforce-now` und `~/.local/share/cloudgaming/xbox-cloud` auf dem starken Host. Sunshine-Keys: `~/.config/sunshine`. Beide werden nicht gelöscht. Diese Persistenz bedeutet ausdrücklich, dass bei einem Hostwechsel ohne gemeinsamen verschlüsselten Speicher **keine** nahtlose Sitzung garantiert werden kann.
 
 ## Tests
 
@@ -84,4 +87,4 @@ python3 -m unittest discover -s . -p 'test_*.py' -v
 python3 cloudgamingctl.py start --dry-run
 ```
 
-Die GitHub CI prüft Steuerung und Routingregel-Generierung **ohne echte Serververbindung**. Ein vollständiger Sunshine/Moonlight/GeForce-NOW-Test erfordert echten SSH-, WireGuard- und Gaming-Host-Zugriff.
+Die GitHub CI prüft Steuerung, Sunshine-Anwendungskonfiguration und Routingregel-Generierung **ohne echte Serververbindung**. Ein vollständiger Sunshine/Moonlight/GeForce-NOW-Test erfordert echten SSH-, WireGuard- und Gaming-Host-Zugriff.
