@@ -27,6 +27,22 @@ try:
         assert 'Welt geladen' in loaded,state
         assert int(speed.split()[0]) > 0,state
         assert not errors,errors
+        # Server receives API capability information; it never renders frames.
+        device=page.locator('#device-info').inner_text()
+        assert 'gemeldet' in device,device
+        assert 'KiB' in page.locator('#network').inner_text()
+        initial=page.request.get('http://127.0.0.1:18766/api/stats').json()['response_bytes']
+        page.get_by_role('button',name='Spielstand auf Server speichern').click()
+        assert 'gespeichert' in page.locator('#save-status').inner_text()
+        page.reload(wait_until='domcontentloaded')
+        page.get_by_role('button',name='Spielen – auf diesem Gerät').click()
+        page.locator('#intro').wait_for(state='hidden',timeout=30000)
+        assert 'fortgesetzt' in page.locator('#save-status').inner_text()
+        page.wait_for_timeout(450)
+        second=page.request.get('http://127.0.0.1:18766/api/stats').json()['response_bytes']
+        reload_bytes=second-initial
+        assert reload_bytes < initial, {'initial_total':initial,'reload_bytes':reload_bytes}
+        state.update(device=device,server_bytes_before_reload=initial,server_bytes_on_reload=reload_bytes)
         screenshot=ROOT/'browser-smoke.png'
         page.screenshot(path=str(screenshot))
         print('BROWSER_GPU_PROOF',state,'screenshot:',screenshot)
