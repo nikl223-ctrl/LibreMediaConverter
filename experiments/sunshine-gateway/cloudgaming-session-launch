@@ -20,7 +20,7 @@ if [[ -z "$browser" ]]; then
   exit 3
 fi
 
-url="$""{CLOUDGAMING_URL:-https://play.geforcenow.com/}"
+url="${CLOUDGAMING_URL:-https://play.geforcenow.com/}"
 case "$url" in
   https://play.geforcenow.com/*|https://www.xbox.com/play*|https://www.xbox.com/*) ;;
   *) echo "Set CLOUDGAMING_URL to an approved HTTPS service" >&2; exit 2 ;;
