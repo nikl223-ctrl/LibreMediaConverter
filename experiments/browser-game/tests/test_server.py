@@ -111,6 +111,32 @@ class AssetServerTests(unittest.TestCase):
             self.get('/api/save',{"X-Game-Session":"unknown"})
         self.assertEqual(ctx.exception.code,401)
 
+    def test_remote_cpu_simulation_state_packets(self):
+        # A real HTTP round-trip: the server advances numeric physics, the
+        # browser is responsible for drawing all visual geometry itself.
+        _,_,body=self.post('/api/session')
+        token=json.loads(body)['token']
+        h={"X-Game-Session":token,"Content-Type":"application/json"}
+        request=json.dumps({"steer":0.4,"gas":True,"brake":False}).encode()
+        state=None
+        response_size=0
+        for _ in range(4):
+            status,_,raw=self.post('/api/remote/step',request,h)
+            self.assertEqual(status,200)
+            state=json.loads(raw)
+            response_size=len(raw)
+        self.assertGreater(state["distance"],0)
+        self.assertGreater(state["velocity"],17)
+        self.assertLess(response_size,200)
+        _,_,stats_raw=self.get('/api/stats')
+        stats=json.loads(stats_raw)
+        self.assertGreaterEqual(stats["remote_steps"],4)
+        self.assertGreaterEqual(stats["remote_request_bytes"],4*len(request))
+        self.assertFalse(json.loads(self.get('/health')[2])["server_gpu"])
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self.post('/api/remote/step',request,{"X-Game-Session":"invalid"})
+        self.assertEqual(ctx.exception.code,400)
+
     def test_dangerous_save_payload_is_rejected(self):
         _,_,raw=self.post('/api/session')
         token=json.loads(raw)['token']
