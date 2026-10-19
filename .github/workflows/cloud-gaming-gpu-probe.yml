@@ -1,0 +1,77 @@
+name: Cloud Gaming GPU Hardware Probe
+
+on:
+  push:
+    branches:
+      - experiment/cloud-gaming-gpu-probe-20261019
+    paths:
+      - ".github/workflows/cloud-gaming-gpu-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-normal-runner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Test usable GPU, encoder and compute capacity
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Cloud-gaming feasibility: normal GitHub-hosted runner"
+            echo ""
+            echo "- Architecture: $(uname -m)"
+            echo "- Logical CPUs: $(nproc)"
+            echo "- RAM: $(awk '/MemTotal:/ {printf "%.1f GiB", $2/1024/1024}' /proc/meminfo)"
+            echo ""
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+          echo "=== Physical/video adapters ==="
+          if command -v lspci >/dev/null 2>&1; then
+            lspci | grep -iE 'vga|display|3d controller|nvidia|amd' || true
+          else
+            echo "lspci unavailable"
+          fi
+
+          echo "=== NVIDIA GPU ==="
+          if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L; then
+            echo "- NVIDIA GPU detected" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No accessible NVIDIA GPU detected"
+            echo "- No accessible NVIDIA GPU detected" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          echo "=== DRM/render devices ==="
+          if [ -d /dev/dri ]; then
+            ls -l /dev/dri
+            echo "- /dev/dri exists (requires driver and decode/encode tests)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No /dev/dri render nodes"
+            echo "- No /dev/dri render nodes" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          echo "=== NVIDIA encoding ==="
+          if [ -e /dev/nvidia0 ]; then
+            ls -l /dev/nvidia*
+          else
+            echo "No /dev/nvidia0 device"
+          fi
+
+          echo "=== FFmpeg availability ==="
+          if command -v ffmpeg >/dev/null 2>&1; then
+            ffmpeg -hide_banner -version | head -n 1
+            echo "- FFmpeg installed" >> "$GITHUB_STEP_SUMMARY"
+            echo "=== Short offline 720p60 software-encode smoke test ==="
+            timeout 45 ffmpeg -nostdin -hide_banner -loglevel error \
+              -f lavfi -i "testsrc2=size=1280x720:rate=60" \
+              -frames:v 120 -an -c:v libx264 -preset ultrafast -tune zerolatency \
+              -f null - && echo "PASS: short software encode" || echo "Software-encode test unavailable/failed"
+          else
+            echo "FFmpeg not installed"
+            echo "- FFmpeg missing" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo ""
+          echo "This is a CI hardware probe, not a live gaming or internet streaming service."
