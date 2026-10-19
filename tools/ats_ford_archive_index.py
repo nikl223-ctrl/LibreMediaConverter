@@ -61,13 +61,13 @@ def tar_header(block):
     if block[257:262] != b"ustar":
         return None
     try:
-        expected = int(block[148:156].strip(b" \\0") or b"0", 8)
+        expected = int(block[148:156].strip(bytes([32, 0])) or b"0", 8)
         actual = sum(block[:148]) + 8 * 32 + sum(block[156:])
         if actual != expected:
             return None
-        size = int(block[124:136].strip(b" \\0") or b"0", 8)
-        prefix = block[345:500].split(b"\\0", 1)[0]
-        name = block[:100].split(b"\\0", 1)[0]
+        size = int(block[124:136].strip(bytes([32, 0])) or b"0", 8)
+        prefix = block[345:500].split(bytes([0]), 1)[0]
+        name = block[:100].split(bytes([0]), 1)[0]
         if prefix:
             name = prefix + b"/" + name
         return name.decode("utf-8", "replace")[:400], size
@@ -85,7 +85,7 @@ def analyze_small_text(session, name, size, offset):
         key, value = stripped.split(":", 1)
         if any(k in key.lower() for k in PHYSICS_KEYS):
             value = value.strip().split("#",1)[0].strip()
-            if re.fullmatch(r"[0-9eE+\\-. ,()]+", value) and len(report["physics_values"]) < 200:
+            if re.fullmatch(r"[0-9eE+., ()-]+", value) and len(report["physics_values"]) < 200:
                 report["physics_values"].append({"file": name, "key": key.strip()[:90], "value": value[:110]})
 
 try:
