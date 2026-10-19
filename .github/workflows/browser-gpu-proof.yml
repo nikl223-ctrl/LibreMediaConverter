@@ -1,0 +1,33 @@
+name: Browser Game Client GPU Proof
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'experiments/browser-game/**'
+      - '.github/workflows/browser-gpu-proof.yml'
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate GPU-free server, lazy assets and HTTP ranges
+        run: python3 -m unittest discover -s experiments/browser-game/tests -v
+      - name: Install browser test tools
+        run: |
+          python3 -m pip install playwright
+          python3 -m playwright install --with-deps chromium
+      - name: Open and drive 3D game in Chromium browser
+        run: python3 experiments/browser-game/tests/browser_smoke.py
+      - name: Upload browser screenshot (not game binaries)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: truck-browser-proof-screenshot
+          path: experiments/browser-game/browser-smoke.png
+          retention-days: 7

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Truck Browser Proof – Client-GPU-Test</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script type="module" src="/game.js"></script>
+</head>
+<body>
+  <header><strong>TRUCK // BROWSER</strong><span class="pill">GPU-Client-Test · kein Cloud Gaming</span></header>
+  <main>
+    <section class="hero">
+      <p class="eyebrow">Experiment: Client-Side Rendering</p>
+      <h1>Das Spiel rendert bei dir.</h1>
+      <p>Dieser Server liefert nur den Code und die Welt. Dein Browser berechnet die Fahrt und zeichnet alles mit WebGPU oder WebGL2.</p>
+    </section>
+    <section id="play-area">
+      <canvas id="game" aria-label="3D-Fahrsimulation" tabindex="0"></canvas>
+      <div id="overlay"><span id="speed">0 km/h</span><span id="fps">0 FPS</span><span id="renderer">Renderer wird gesucht</span></div>
+      <div id="intro"><h2>Truck-Browser-Demo</h2><p>Fahre einen Lkw über eine einfache 3D-Straße. Die GPU des Servers wird nicht verwendet.</p><button id="start" type="button">▶ Spielen – auf diesem Gerät</button><p class="hint">W / ↑ beschleunigen · S / ↓ bremsen · A/D oder ←/→ lenken · Gamepad unterstützt</p></div>
+      <div id="mobile"><button id="left" type="button">◀</button><button id="gas" type="button">Gas</button><button id="brake" type="button">Bremse</button><button id="right" type="button">▶</button></div>
+    </section>
+    <section class="metrics">
+      <div><small>Server</small><strong id="server">Prüfung läuft …</strong></div>
+      <div><small>Grafik</small><strong id="gpu">Wird erkannt</strong></div>
+      <div><small>Leveldaten</small><strong id="loaded">Noch nicht geladen</strong></div>
+    </section>
+    <details><summary>Was wird hier tatsächlich bewiesen?</summary>
+      <p>Eine Webseite kann Dateien dynamisch von einem GPU-losen Server laden und die Grafik auf PC/Xbox/Mobilgerät selbst rendern, sofern die jeweilige Browser-Grafik-API verfügbar ist. Dieses Demo enthält **kein** ETS/ATS und keine Windows-Spiel-EXE. Native Spiele brauchen eine Browser-Portierung ihrer Engine.</p>
+    </details>
+  </main>
+  <footer>Browser-Engine-Prototyp · keine Steam-, SCS- oder Xbox-Anmeldung erforderlich</footer>
+</body>
+</html>

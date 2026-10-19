@@ -1,0 +1,7 @@
+{
+  "title": "Truck Browser Proof – On-device rendering",
+  "license": "Original demo level, no ETS/ATS assets included",
+  "track": { "roadWidth": 12, "length": 2400, "laneCount": 2, "speedLimit": 110 },
+  "vehicle": { "color": [0.13, 0.46, 0.86], "maxSpeedKmh": 190, "acceleration": 11, "braking": 26 },
+  "scenery": { "treesEvery": 37, "housesEvery": 75, "seed": 37 }
+}
