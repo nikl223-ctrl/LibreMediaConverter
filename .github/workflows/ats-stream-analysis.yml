@@ -1,0 +1,55 @@
+name: ATS Drive TAR and Ford DLC inventory
+
+on:
+  push:
+    paths:
+      - .github/workflows/ats-stream-analysis.yml
+  workflow_dispatch:
+    inputs:
+      file_id:
+        description: Google Drive ATS TAR file ID
+        type: string
+        default: 1Wy4wO6NDJadF7EvZqiu-0zTU-tdiswAq
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-ats:
+    name: Authenticated TAR and SCS inventory
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Python reader
+        run: python3 -m pip install --quiet --break-system-packages requests google-auth
+      - name: Stream archive and inspect vehicle definitions
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          ATS_DRIVE_FILE_ID: ${{ inputs.file_id || '1Wy4wO6NDJadF7EvZqiu-0zTU-tdiswAq' }}
+        run: python3 -u tools/ats_drive_inventory.py
+      - name: Upload metadata-only report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ats-ford-dlc-inventory
+          path: ats-analysis/inventory.json
+          retention-days: 7
+      - name: Summarize
+        if: always()
+        shell: bash
+        run: |
+          if [ -f ats-analysis/inventory.json ]; then
+            python3 - <<'PY'
+          import json,os
+          d=json.load(open('ats-analysis/inventory.json'))
+          text=['## ATS / Ford DLC TAR scan', 'Status: **'+d.get('status','unknown')+'**',
+                'TAR entries: '+str(d.get('tar_entries',0)),
+                'SCS packages inspected: '+str(len(d.get('scs_archives',[])))]
+          text += ['- '+x.get('path','?')+' ('+x.get('format','unknown')+')' for x in d.get('scs_archives',[])[:30]]
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:f.write('\n'.join(text)+'\n')
+          PY
+          fi
