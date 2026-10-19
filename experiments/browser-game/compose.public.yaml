@@ -1,0 +1,27 @@
+# Optional HTTPS reverse proxy for PC and Xbox browsers over the internet.
+# Run with: docker compose -f compose.yaml -f compose.public.yaml up -d --build
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      SITE_DOMAIN: "${SITE_DOMAIN:?Set SITE_DOMAIN to your own domain with DNS pointing at this Linux server}"
+      BASIC_AUTH_HASH: "${BASIC_AUTH_HASH:?Generate password hash with caddy hash-password and set BASIC_AUTH_HASH}"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      browsergame:
+        condition: service_started
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+volumes:
+  caddy_data:
+  caddy_config:
