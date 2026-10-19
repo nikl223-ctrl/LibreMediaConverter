@@ -9,20 +9,21 @@ permissions:
   actions: write
 jobs:
   cancel-obsolete:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     timeout-minutes: 5
     steps:
-      - name: Cancel only the two obsolete ATS runs
+      - name: Cancel only obsolete ATS runs
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
           for id in 39278422561 39279920247; do
-            echo "Requesting cancellation for run $id"
+            echo "Attempting normal cancellation for $id"
             if gh api --method POST "repos/$GH_REPO/actions/runs/$id/cancel"; then
-              echo "Cancellation accepted for $id"
+              echo "Normal cancellation accepted: $id"
             else
-              echo "Cancellation not accepted for $id (possibly already finished)"
+              echo "Normal cancellation did not succeed; trying force cancel: $id"
+              gh api --method POST "repos/$GH_REPO/actions/runs/$id/force-cancel" || true
             fi
           done
