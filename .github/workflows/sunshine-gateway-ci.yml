@@ -1,0 +1,34 @@
+name: Sunshine Gateway Config CI
+
+on:
+  push:
+    branches:
+      - experiment/sunshine-gateway-20261019
+    paths:
+      - 'experiments/sunshine-gateway/**'
+      - '.github/workflows/sunshine-gateway-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-generator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run isolated Python generator tests
+        run: |
+          cd experiments/sunshine-gateway
+          python3 -m unittest -v test_render_nft.py
+      - name: Preview (never apply) nftables NAT rules
+        run: |
+          cd experiments/sunshine-gateway
+          python3 render_nft.py --ingress eth0 --wireguard wg0 --upstream 10.77.0.2 --allow-clients 10.66.0.0/24 > /tmp/sunshine-gateway.nft
+          cat /tmp/sunshine-gateway.nft
+          if command -v nft >/dev/null 2>&1; then
+            sudo nft -c -f /tmp/sunshine-gateway.nft
+          else
+            echo 'nft binary unavailable; Python unit tests have passed'
+          fi
