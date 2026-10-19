@@ -26,6 +26,15 @@ jobs:
         run: |
           bash -n experiments/sunshine-gateway/cloudgaming-remote-control
           bash -n experiments/sunshine-gateway/cloudgaming-session-launch
+          bash -n experiments/sunshine-gateway/cloudgaming-app
+          bash experiments/sunshine-gateway/cloudgaming-app geforce-now --dry-run
+          bash experiments/sunshine-gateway/cloudgaming-app xbox-cloud --dry-run
+      - name: Validate Sunshine apps configuration without touching existing services
+        run: |
+          python3 experiments/sunshine-gateway/make_sunshine_apps.py > /tmp/sunshine-gaming-apps.json
+          python3 -m json.tool /tmp/sunshine-gaming-apps.json >/dev/null
+          grep -q 'GeForce NOW' /tmp/sunshine-gaming-apps.json
+          grep -q 'Xbox Cloud Gaming' /tmp/sunshine-gaming-apps.json
       - name: Preview (never apply) nftables NAT rules
         run: |
           cd experiments/sunshine-gateway
