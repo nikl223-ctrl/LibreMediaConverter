@@ -1,0 +1,6 @@
+{
+  "remote_host": "10.77.0.2",
+  "remote_user": "cloudgaming",
+  "ssh_key": "~/.ssh/cloudgaming_ed25519",
+  "ssh_port": 22
+}
