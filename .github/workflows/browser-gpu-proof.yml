@@ -42,5 +42,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: truck-browser-proof-screenshot
-          path: experiments/browser-game/browser-smoke.png
+          path: |
+            experiments/browser-game/browser-smoke.png
+            experiments/browser-game/remote-browser-smoke.png
           retention-days: 7
