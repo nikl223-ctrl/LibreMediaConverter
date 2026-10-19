@@ -68,7 +68,7 @@ async function ensureSession() {
   try { sessionToken = window.localStorage.getItem('truck-browser-save-token'); }
   catch { sessionToken = null; }
   if (sessionToken) {
-    const r = await fetch('/api/save', {headers: {'Authorization': 'Bearer '+sessionToken}, cache: 'no-store'});
+    const r = await fetch('/api/save', {headers: {'X-Game-Session': sessionToken}, cache: 'no-store'});
     if (r.ok) {
       const state = await r.json();
       if (['x','z','velocity','distance'].every(k => Number.isFinite(state[k]))) {
@@ -99,7 +99,7 @@ async function saveGame(keepalive = false) {
     const payload = JSON.stringify({x:vehicle.x,z:vehicle.z,velocity:vehicle.velocity,distance:vehicle.distance});
     const response = await fetch('/api/save', {
       method: 'POST',
-      headers: {'Authorization':'Bearer '+sessionToken, 'Content-Type':'application/json'},
+      headers: {'X-Game-Session': sessionToken, 'Content-Type':'application/json'},
       body: payload, keepalive, cache: 'no-store'
     });
     if (!response.ok) throw new Error('HTTP '+response.status);
