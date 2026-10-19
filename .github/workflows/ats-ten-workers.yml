@@ -1,0 +1,48 @@
+name: ATS 10-worker archive inspection
+on:
+  workflow_dispatch:
+    inputs:
+      file_id:
+        description: Google Drive file ID
+        required: true
+        default: 1Wy4wO6NDJadF7EvZqiu-0zTU-tdiswAq
+jobs:
+  inspect:
+    name: Worker ${{ matrix.worker }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        worker: [0,1,2,3,4,5,6,7,8,9]
+    steps:
+      - name: Check remote file and byte-range support
+        env:
+          FILE_ID: ${{ inputs.file_id }}
+          WORKER: ${{ matrix.worker }}
+        run: |
+          python3 - <<'PY'
+          import os,urllib.request,json,time
+          url='https://drive.google.com/uc?export=download&id='+os.environ['FILE_ID']
+          result={'worker':int(os.environ['WORKER']),'url_test':'pending'}
+          try:
+              req=urllib.request.Request(url,headers={'Range':'bytes=0-1023','User-Agent':'Mozilla/5.0'})
+              with urllib.request.urlopen(req,timeout=35) as r:
+                  data=r.read(1024)
+                  result.update(status=r.status,content_type=r.headers.get('Content-Type'),content_range=r.headers.get('Content-Range'),sample_bytes=len(data),range_supported=r.status==206)
+          except Exception as e: result.update(error=str(e))
+          with open('inspection.json','w') as f: json.dump(result,f,indent=2)
+          print(json.dumps(result,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ats-worker-${{ matrix.worker }}
+          path: inspection.json
+      - name: Keep worker active for up to 350 minutes
+        shell: bash
+        run: |
+          end=$((SECONDS + 350*60))
+          while (( SECONDS < end )); do
+            echo "Worker ${{ matrix.worker }} heartbeat at $(date -u +%FT%TZ)"
+            sleep 60
+          done
