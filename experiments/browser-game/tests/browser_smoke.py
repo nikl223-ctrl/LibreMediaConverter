@@ -46,6 +46,27 @@ try:
         screenshot=ROOT/'browser-smoke.png'
         page.screenshot(path=str(screenshot))
         print('BROWSER_GPU_PROOF',state,'screenshot:',screenshot)
+        # Same GPU-free host, but now the CPU on Linux performs the physics.
+        # The web browser still sends only controls and renders with WebGL2.
+        page.goto('http://127.0.0.1:18766/?remote=1',wait_until='domcontentloaded')
+        assert page.locator('#remote-mode').is_checked()
+        page.locator('#start').click()
+        page.locator('#intro').wait_for(state='hidden',timeout=30000)
+        page.wait_for_timeout(1600)
+        remote=page.request.get('http://127.0.0.1:18766/api/stats').json()
+        display=page.locator('#renderer').inner_text()
+        assert 'WebGL2' in display or 'WebGPU' in display,display
+        assert remote['remote_steps'] >= 5,remote
+        assert remote['remote_request_bytes'] < remote['remote_steps'] * 150,remote
+        assert 'CPU-Server' in page.locator('#server').inner_text()
+        assert not errors,errors
+        print('REMOTE_CPU_CLIENT_GPU_PROOF',{
+            'steps':remote['remote_steps'],
+            'input_payload_bytes':remote['remote_request_bytes'],
+            'average_input_bytes':round(remote['remote_request_bytes']/remote['remote_steps'],2),
+            'server_video_frames':0,
+            'client_renderer':display,
+        })
         browser.close()
 finally:
     proc.terminate()
