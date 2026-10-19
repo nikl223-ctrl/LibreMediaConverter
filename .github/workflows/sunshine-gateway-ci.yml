@@ -22,6 +22,10 @@ jobs:
         run: |
           cd experiments/sunshine-gateway
           python3 -m unittest discover -s . -p 'test_*.py' -v
+      - name: Validate remote control shell scripts
+        run: |
+          bash -n experiments/sunshine-gateway/cloudgaming-remote-control
+          bash -n experiments/sunshine-gateway/cloudgaming-session-launch
       - name: Preview (never apply) nftables NAT rules
         run: |
           cd experiments/sunshine-gateway
