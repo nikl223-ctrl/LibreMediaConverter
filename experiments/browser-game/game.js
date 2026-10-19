@@ -9,6 +9,13 @@ const startButton = document.querySelector('#start');
 const intro = document.querySelector('#intro');
 const loadText = document.querySelector('#loaded');
 const serverText = document.querySelector('#server');
+const deviceText = document.querySelector('#device-info');
+const networkText = document.querySelector('#network');
+const saveText = document.querySelector('#save-status');
+const saveButton = document.querySelector('#save-now');
+const quitButton = document.querySelector('#quit');
+let sessionToken = null;
+let isSaving = false;
 let renderer = null;
 let world = null;
 let isRunning = false;
@@ -27,6 +34,83 @@ window.__TRUCK_POC = {
   get distance() { return vehicle.distance; }
 };
 
+async function probeClient() {
+  // A web page can test graphics APIs, but cannot reliably inspect physical GPU
+  // hardware, dedicated GPU memory, or Xbox system internals.
+  const c = document.createElement('canvas');
+  const gl = c.getContext('webgl2');
+  const webgl2 = !!gl;
+  gl?.getExtension('WEBGL_lose_context')?.loseContext();
+  let webgpu = false;
+  if (window.isSecureContext && navigator.gpu) {
+    try { webgpu = !!(await navigator.gpu.requestAdapter()); }
+    catch { webgpu = false; }
+  }
+  const profile = {webgpu, webgl2};
+  try {
+    const r = await fetch('/api/client', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(profile)});
+    if (!r.ok) throw new Error('HTTP '+r.status);
+    const result = await r.json();
+    deviceText.textContent = 'An Server gemeldet: '+(result.render_mode || 'unbekannt')+' verfügbar';
+  } catch (error) {
+    deviceText.textContent = 'Erkannt: '+(webgpu?'WebGPU':webgl2?'WebGL2':'nur Canvas2D')+' · Servermeldung fehlgeschlagen';
+  }
+  refreshNetwork();
+}
+function refreshNetwork() {
+  const events = performance.getEntriesByType('resource');
+  const nav = performance.getEntriesByType('navigation');
+  const bytes = [...nav, ...events].reduce((n, v) => n + (v.transferSize || 0), 0);
+  const kib = bytes / 1024;
+  networkText.textContent = kib.toFixed(1)+' KiB seit Seitenaufruf';
+}
+async function ensureSession() {
+  try { sessionToken = window.localStorage.getItem('truck-browser-save-token'); }
+  catch { sessionToken = null; }
+  if (sessionToken) {
+    const r = await fetch('/api/save', {headers: {'Authorization': 'Bearer '+sessionToken}, cache: 'no-store'});
+    if (r.ok) {
+      const state = await r.json();
+      if (['x','z','velocity','distance'].every(k => Number.isFinite(state[k]))) {
+        Object.assign(vehicle, state);
+        saveText.textContent = 'Gespeicherte Fahrt fortgesetzt';
+      }
+    } else if (r.status === 401) {
+      sessionToken = null; // Server lost session file or address changed.
+    } else if (r.status === 404) {
+      saveText.textContent = 'Neuer Spielstand';
+    } else { throw new Error('Spielstand HTTP '+r.status); }
+  }
+  if (!sessionToken) {
+    const r = await fetch('/api/session', {method: 'POST', body: ''});
+    if (!r.ok) throw new Error('Neue Sitzung HTTP '+r.status);
+    sessionToken = (await r.json()).token;
+    try { window.localStorage.setItem('truck-browser-save-token', sessionToken); }
+    catch { /* Saves still work until the browser tab closes. */ }
+    saveText.textContent = 'Neuer Spielstand auf Server';
+  }
+  saveButton.disabled = false;
+  quitButton.disabled = false;
+}
+async function saveGame(keepalive = false) {
+  if (!sessionToken || isSaving) return;
+  isSaving = true;
+  try {
+    const payload = JSON.stringify({x:vehicle.x,z:vehicle.z,velocity:vehicle.velocity,distance:vehicle.distance});
+    const response = await fetch('/api/save', {
+      method: 'POST',
+      headers: {'Authorization':'Bearer '+sessionToken, 'Content-Type':'application/json'},
+      body: payload, keepalive, cache: 'no-store'
+    });
+    if (!response.ok) throw new Error('HTTP '+response.status);
+    if (!keepalive) saveText.textContent = 'Spielstand auf Server gespeichert';
+  } catch (error) {
+    if (!keepalive) saveText.textContent = 'Speichern fehlgeschlagen: '+error.message;
+  } finally {
+    isSaving = false;
+    refreshNetwork();
+  }
+}
 function updateCanvasSize() {
   const width = Math.max(2, Math.floor(canvas.clientWidth * Math.min(2, window.devicePixelRatio || 1)));
   const height = Math.max(2, Math.floor(canvas.clientHeight * Math.min(2, window.devicePixelRatio || 1)));
@@ -234,17 +318,38 @@ function frame(ms){
 async function start(){
   startButton.disabled=true;startButton.textContent='Lädt Level und Grafik …';
   try{
-    const response=await fetch('/api/world',{cache:'no-store'});
+    const response=await fetch('/api/world',{cache:'default'});
     if(!response.ok)throw new Error('Spieldaten HTTP '+response.status);
     world=await response.json();
     if(!world.track?.roadWidth||!world.vehicle?.maxSpeedKmh)throw new Error('Leveldaten unvollständig');
     loadText.textContent='Welt geladen ('+(response.headers.get('X-Asset-Source')||'Server')+')';
     try{renderer=await createWebGPURenderer();}catch(e){console.info('WebGPU unavailable; fallback to WebGL2:',e.message);try{renderer=createWebGLRenderer();}catch(glError){console.info('WebGL2 unavailable; CPU canvas fallback:',glError.message);renderer=createCanvas2DRenderer();}}
     gpuStatus.textContent='Grafik: '+renderer.type+' auf diesem Gerät';status.textContent=renderer.type+' (lokal)';
+    try { await ensureSession(); }
+    catch (error) { saveText.textContent='Server-Spielstand nicht verfügbar: '+error.message; }
     intro.hidden=true;intro.style.display='none';canvas.focus();isRunning=true;last=performance.now();requestAnimationFrame(frame);
+    refreshNetwork();
   }catch(error){console.error(error);startButton.disabled=false;startButton.textContent='Nochmal versuchen';loadText.textContent=error.message;}
 }
 startButton.addEventListener('click',start);
+saveButton.addEventListener('click',()=>saveGame());
+quitButton.addEventListener('click',async()=>{
+  isRunning = false;
+  await saveGame();
+  intro.hidden = false; intro.style.display = 'flex';
+  startButton.disabled = false;
+  startButton.textContent = '▶ Weiterfahren – auf diesem Gerät';
+  saveButton.disabled = true; quitButton.disabled = true;
+});
+window.addEventListener('pagehide',()=>{
+  if (isRunning && sessionToken && !isSaving) {
+    // Best-effort save; the explicit save/quit buttons are more reliable.
+    saveGame(true);
+  }
+});
+setInterval(()=>{ if (isRunning) saveGame(); },30000);
+setInterval(refreshNetwork,3000);
+probeClient();
 for(const name of ['left','right','gas','brake']){
   const el=document.getElementById(name);
   el.addEventListener('pointerdown',e=>{touches[name]=true;el.setPointerCapture(e.pointerId);});
