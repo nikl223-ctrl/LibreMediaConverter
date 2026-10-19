@@ -21,7 +21,7 @@ jobs:
       - name: Run isolated Python generator tests
         run: |
           cd experiments/sunshine-gateway
-          python3 -m unittest -v test_render_nft.py
+          python3 -m unittest discover -s . -p 'test_*.py' -v
       - name: Preview (never apply) nftables NAT rules
         run: |
           cd experiments/sunshine-gateway
