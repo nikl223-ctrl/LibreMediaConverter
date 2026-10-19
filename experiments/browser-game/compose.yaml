@@ -1,0 +1,30 @@
+# Runs on any Linux host with Docker Compose; NO GPU access required.
+# Default binding is loopback only. For LAN use BIND_HOST=0.0.0.0 and a LAN firewall.
+services:
+  browsergame:
+    build: .
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8765"
+      BROWSER_GAME_DATA_DIR: /data
+      DRIVE_CACHE_SECONDS: "${DRIVE_CACHE_SECONDS:-600}"
+      DRIVE_LEVEL_FILE_ID: "${DRIVE_LEVEL_FILE_ID:-}"
+      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
+      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
+      GOOGLE_REFRESH_TOKEN: "${GOOGLE_REFRESH_TOKEN:-}"
+    ports:
+      - "${BIND_HOST:-127.0.0.1}:${BIND_PORT:-8765}:8765"
+    volumes:
+      - browser_game_data:/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,noexec,size=16m
+    pids_limit: 100
+    mem_limit: 512m
+volumes:
+  browser_game_data:
