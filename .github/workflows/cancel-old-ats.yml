@@ -1,0 +1,28 @@
+name: Cancel obsolete ATS inspections
+on:
+  push:
+    paths:
+      - .github/workflows/cancel-old-ats.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: write
+jobs:
+  cancel-obsolete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Cancel only the two obsolete ATS runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          for id in 39278422561 39279920247; do
+            echo "Requesting cancellation for run $id"
+            if gh api --method POST "repos/$GH_REPO/actions/runs/$id/cancel"; then
+              echo "Cancellation accepted for $id"
+            else
+              echo "Cancellation not accepted for $id (possibly already finished)"
+            fi
+          done
