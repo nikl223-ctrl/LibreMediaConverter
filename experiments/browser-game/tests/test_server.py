@@ -98,7 +98,7 @@ class AssetServerTests(unittest.TestCase):
         code,_,raw=self.post('/api/session')
         self.assertEqual(code,200)
         token=json.loads(raw)['token']
-        auth={"Authorization":"Bearer "+token}
+        auth={"X-Game-Session":token}
         state={"x":1.25,"z":333.5,"velocity":10.0,"distance":318.3}
         status,_,raw=self.post('/api/save',json.dumps(state).encode(),auth)
         self.assertEqual(status,200)
@@ -108,7 +108,7 @@ class AssetServerTests(unittest.TestCase):
         # The save stays on the CPU-only server filesystem.
         self.assertTrue(any((ROOT/'.runtime'/'saves').glob('*.json')))
         with self.assertRaises(urllib.error.HTTPError) as ctx:
-            self.get('/api/save',{"Authorization":"Bearer unknown"})
+            self.get('/api/save',{"X-Game-Session":"unknown"})
         self.assertEqual(ctx.exception.code,401)
 
     def test_dangerous_save_payload_is_rejected(self):
@@ -116,7 +116,7 @@ class AssetServerTests(unittest.TestCase):
         token=json.loads(raw)['token']
         with self.assertRaises(urllib.error.HTTPError) as ctx:
             self.post('/api/save',b'{"x":"../../private","z":0,"velocity":0,"distance":0}',
-                      {"Authorization":"Bearer "+token})
+                      {"X-Game-Session":token})
         self.assertEqual(ctx.exception.code,400)
 
     def test_asset_etag_and_browser_cache(self):
