@@ -31,12 +31,34 @@ jobs:
           GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
           ATS_DRIVE_FILE_ID: ${{ inputs.file_id || '1Wy4wO6NDJadF7EvZqiu-0zTU-tdiswAq' }}
         run: python3 -u tools/ats_drive_inventory.py
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Extract Ford DLC definitions from local SCS packages
+        shell: bash
+        run: |
+          mkdir -p /tmp/ats-scs-definitions ats-analysis
+          if compgen -G '/tmp/ats-inspect-*.scs' > /dev/null; then
+            git clone --quiet https://github.com/sk-zk/Extractor.git /tmp/ats-scs-tool
+            git -C /tmp/ats-scs-tool checkout --quiet 1a318e6c57e6f703ba86ced8006587ce853109c9
+            dotnet publish /tmp/ats-scs-tool/Extractor/Extractor.csproj -c Release -o /tmp/ats-scs-bin
+            number=0
+            for archive in /tmp/ats-inspect-*.scs; do
+              mkdir -p "/tmp/ats-scs-definitions/$number"
+              dotnet /tmp/ats-scs-bin/Extractor.dll "$archive" --partial=/def --dest="/tmp/ats-scs-definitions/$number" --quiet || echo "Could not extract $archive"
+              number=$((number+1))
+            done
+          fi
+          find /tmp/ats-scs-definitions -type f \( -name '*.sii' -o -name '*.sui' \) | wc -l > ats-analysis/definition-file-count.txt
+          (grep -RhEi '^[[:space:]]*(kerb_weight|mass|residual_travel|torque|rpm_limit|ratios_forward|steer[a-z_]*|suspension[a-z_]*|brake[a-z_]*|drag[a-z_]*|friction[a-z_]*|roll[a-z_]*|wheel[a-z_]*):' /tmp/ats-scs-definitions | head -n 1000 || true) > ats-analysis/physics-parameter-matches.txt
+          echo "SCS definition count:"; cat ats-analysis/definition-file-count.txt
+          echo "Numeric configuration lines:"; wc -l ats-analysis/physics-parameter-matches.txt
       - name: Upload metadata-only report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ats-ford-dlc-inventory
-          path: ats-analysis/inventory.json
+          path: ats-analysis/
           retention-days: 7
       - name: Summarize
         if: always()
