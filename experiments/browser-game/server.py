@@ -107,7 +107,7 @@ class Handler(BaseHTTPRequestHandler):
                     "render_mode": chosen, "client_rendering": True,
                     "server_gpu": False, "native_steam_supported": False
                 }).encode(), "application/json")
-            token = self.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+            token = self.headers.get("X-Game-Session", "").strip()
             low_bandwidth.write_save(token, body)
             with _lock:
                 _stats["save_writes"] += 1
@@ -127,7 +127,7 @@ class Handler(BaseHTTPRequestHandler):
                          "cache_seconds": CACHE_TTL}
                 return self.send_bytes(200, json.dumps(value).encode(), "application/json", head_only=head_only)
             if path == "/api/save":
-                token = self.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+                token = self.headers.get("X-Game-Session", "").strip()
                 try:
                     state = low_bandwidth.read_save(token)
                 except (ValueError, PermissionError):
