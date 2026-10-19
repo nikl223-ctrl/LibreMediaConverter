@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Run on the authorized remote compute host, as the desktop account.
 set -euo pipefail
-export XDG_RUNTIME_DIR="$""{XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
-export DBUS_SESSION_BUS_ADDRESS="$""{DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
 unit="cloudgaming-session.service"
 if [[ ! -S "$XDG_RUNTIME_DIR/bus" ]]; then
   echo "The user-systemd bus is unavailable; configure the desktop session/linger first" >&2
   exit 3
 fi
-case "$""{1:-}" in
+case "${1:-}" in
   start)
     # RuntimeMaxSec expiration leaves a failed unit; clear it before a NEW session.
     systemctl --user reset-failed "$unit" || true
