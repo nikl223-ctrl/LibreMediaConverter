@@ -8,6 +8,7 @@ Tokens never leave this server. The in-memory Drive cache expires by TTL.
 import hashlib
 import json
 import low_bandwidth
+import remote_sim
 import mimetypes
 import os
 import re
@@ -24,7 +25,7 @@ MAX_LEVEL_BYTES = 2 * 1024 * 1024
 CACHE_TTL = max(1, int(os.getenv("DRIVE_CACHE_SECONDS", "600")))
 _lock = threading.RLock()
 _cache = {"data": None, "until": 0, "from": "none"}
-_stats = {"responses": 0, "response_bytes": 0, "drive_fetches": 0, "client_probes": 0, "save_writes": 0}
+_stats = {"responses": 0, "response_bytes": 0, "drive_fetches": 0, "client_probes": 0, "save_writes": 0, "remote_steps": 0, "remote_request_bytes": 0}
 
 
 def get_drive_level():
@@ -82,7 +83,7 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "-1"))
         except ValueError:
             length = -1
-        if path not in ("/api/session", "/api/client", "/api/save"):
+        if path not in ("/api/session", "/api/client", "/api/save", "/api/remote/step"):
             return self.send_bytes(404, b"Not Found", "text/plain")
         if length < 0 or length > low_bandwidth.MAX_SAVE_BYTES:
             return self.send_bytes(413, b'{"error":"request too large"}', "application/json")
@@ -108,6 +109,12 @@ class Handler(BaseHTTPRequestHandler):
                     "server_gpu": False, "native_steam_supported": False
                 }).encode(), "application/json")
             token = self.headers.get("X-Game-Session", "").strip()
+            if path == "/api/remote/step":
+                state = remote_sim.step(token, json.loads(body))
+                with _lock:
+                    _stats["remote_steps"] += 1
+                    _stats["remote_request_bytes"] += len(body)
+                return self.send_bytes(200, json.dumps(state, separators=(",", ":")).encode(), "application/json")
             low_bandwidth.write_save(token, body)
             with _lock:
                 _stats["save_writes"] += 1
