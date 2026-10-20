@@ -1,0 +1,113 @@
+name: LEGO Star Wars 4K Edition - 20 Texture Workers
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/lego-star-wars-4k-20-workers.yml']
+permissions:
+  contents: read
+concurrency:
+  group: lego-star-wars-4k-20-workers
+  cancel-in-progress: false
+jobs:
+  prepare-drive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create private Google Drive folders
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/lego_gog_drive_auth.sh
+          rclone mkdir 'drive:LEGO Star Wars 4K Edition/00_source_manifest'
+          rclone mkdir 'drive:LEGO Star Wars 4K Edition/02_worker_outputs/standalone-dds'
+          rclone mkdir 'drive:LEGO Star Wars 4K Edition/04_final_pack'
+          echo 'GOOGLE_DRIVE_4K_PROJECT_FOLDER_READY=yes'
+  convert:
+    name: Texture Worker ${{ matrix.part }} / 20
+    needs: prepare-drive
+    runs-on: ubuntu-latest
+    timeout-minutes: 170
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        part: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]
+    env:
+      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authorize private Drive (no game data in GitHub artifacts)
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/lego_gog_drive_auth.sh
+      - name: Install archive reader and image conversion dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/gog-venv"
+          "$RUNNER_TEMP/gog-venv/bin/python" -m pip install -q --disable-pip-version-check 'Pillow>=10,<13'
+          git clone --depth 1 https://github.com/stryderjoe/tt-oldera-tools.git "$RUNNER_TEMP/nu20-tools"
+          test -s "$RUNNER_TEMP/nu20-tools/tools/ttdat.py"
+      - name: Convert assigned original game textures to 4K-ready private package
+        shell: bash
+        env:
+          WORKER_ID: ${{ matrix.part }}
+        run: |
+          set -euo pipefail
+          umask 077
+          trap 'rm -f -- "$RUNNER_TEMP/owned-game.dat" "$RUNNER_TEMP/upscaled-chunk.zip"' EXIT
+          rclone copyto 'drive:GAME.DAT' "$RUNNER_TEMP/owned-game.dat" \
+             --drive-root-folder-id '1V-pB0WqJUp9RBxoLxBkbMzYBSgU492sx' \
+             --retries 4 --low-level-retries 8 --log-level ERROR
+          test "$(stat -c %s "$RUNNER_TEMP/owned-game.dat")" -eq 654816452 || {
+            echo "::error::Unexpected source archive size"; exit 1;
+          }
+          PYTHONPATH="$RUNNER_TEMP/nu20-tools/tools" "$RUNNER_TEMP/gog-venv/bin/python" \
+            scripts/lego_gog_texture_worker.py \
+            --source "$RUNNER_TEMP/owned-game.dat" --output "$RUNNER_TEMP/upscaled-chunk.zip" \
+            --workers 20 --worker "$WORKER_ID" --scale 4 --max-dimension 4096
+          printf -v part "%02d" "$WORKER_ID"
+          rclone copyto "$RUNNER_TEMP/upscaled-chunk.zip" \
+            "drive:LEGO Star Wars 4K Edition/02_worker_outputs/standalone-dds/worker_${part}.zip" \
+            --retries 4 --low-level-retries 8 --log-level ERROR
+          echo "PRIVATE_DRIVE_WORKER_UPLOADED=worker_${part}.zip"
+          echo 'GITHUB_COMMERCIAL_GAME_ARTIFACTS=none'
+  validate:
+    name: Verify all 20 private Drive uploads
+    needs: convert
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate private Drive worker ZIP metadata (no asset download)
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/lego_gog_drive_auth.sh
+          rclone lsjson 'drive:LEGO Star Wars 4K Edition/02_worker_outputs/standalone-dds' \
+            --files-only > "$RUNNER_TEMP/lego-4k-chunks.json"
+          python3 - "$RUNNER_TEMP/lego-4k-chunks.json" <<'PY'
+          import json,sys
+          rows=json.load(open(sys.argv[1]))
+          found={r['Name'] for r in rows if r.get('Size',0)>0}
+          wanted={f'worker_{i:02}.zip' for i in range(20)}
+          missing=sorted(wanted-found)
+          print('UPLOADED_PRIVATE_WORKERS='+str(len(found & wanted))+'/20')
+          print('MISSING_WORKERS='+repr(missing))
+          assert not missing,'Missing private texture ZIP chunks'
+          print('LEGO_4K_STANDALONE_DDS_BATCH_COMPLETE=PASS')
+          print('NEW_ENGINE_AND_GAMEPLAY_NOT_YET_IMPLEMENTED=yes')
+          PY
