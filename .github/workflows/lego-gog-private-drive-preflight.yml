@@ -1,0 +1,60 @@
+name: LEGO GOG - Private Drive Source Access Preflight
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/lego-gog-private-drive-preflight.yml']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Set up rclone without persisting credentials
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for key in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET GOOGLE_REFRESH_TOKEN; do
+            test -n "$(printenv "$key")" || { echo "Missing credential: $key"; exit 1; }
+          done
+          test "$(printf %s "$GOOGLE_CLIENT_ID" | cut -d- -f1)" = "160241343420"
+          command -v rclone || { sudo apt-get update -qq; sudo apt-get install -y -qq rclone; }
+          sudo apt-get install -y -qq jq >/dev/null
+          response=$(curl --fail --silent --show-error --request POST \
+            --data-urlencode "client_id=$GOOGLE_CLIENT_ID" \
+            --data-urlencode "client_secret=$GOOGLE_CLIENT_SECRET" \
+            --data-urlencode "refresh_token=$GOOGLE_REFRESH_TOKEN" \
+            --data-urlencode "grant_type=refresh_token" https://oauth2.googleapis.com/token)
+          access_token=$(jq -r '.access_token // empty' <<<"$response")
+          test -n "$access_token"
+          echo "::add-mask::$access_token"
+          expiry=$(date -u -d '+3500 seconds' '+%Y-%m-%dT%H:%M:%SZ')
+          token_json=$(jq -cn --arg at "$access_token" --arg rt "$GOOGLE_REFRESH_TOKEN" --arg ex "$expiry" \
+            '{access_token:$at,token_type:"Bearer",refresh_token:$rt,expiry:$ex}')
+          install -d -m 700 "$RUNNER_TEMP/lego-credentials"
+          export RCLONE_CONFIG="$RUNNER_TEMP/lego-credentials/rclone.conf"
+          echo "RCLONE_CONFIG=$RCLONE_CONFIG" >> "$GITHUB_ENV"
+          rclone config create drive drive client_id "$GOOGLE_CLIENT_ID" \
+            client_secret "$GOOGLE_CLIENT_SECRET" scope drive token "$token_json" --non-interactive >/dev/null
+          chmod 600 "$RCLONE_CONFIG"
+      - name: Verify owned GOG Episode I exists (metadata only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          id='1V-pB0WqJUp9RBxoLxBkbMzYBSgU492sx'
+          rclone lsjson drive: --drive-root-folder-id "$id" --files-only --max-depth 1 > "$RUNNER_TEMP/lego-file-metadata.json"
+          python3 - "$RUNNER_TEMP/lego-file-metadata.json" <<'PY'
+          import json,sys
+          rows=json.load(open(sys.argv[1]))
+          wanted=('EPISODE_I.DAT','EPISODE_II.DAT','EPISODE_III.DAT','EPISODE_IV.DAT','EPISODE_V.DAT','EPISODE_VI.DAT')
+          present={r["Name"].upper():r for r in rows}
+          for name in wanted:
+              print(f"OWNED_GOG_SOURCE {name}: {'FOUND' if name in present else 'MISSING'}")
+          assert all(name in present for name in wanted),'GOG archives not accessible with this Drive account'
+          print('GITHUB_HOSTED_GOG_DRIVE_OAUTH_PREFLIGHT=PASS')
+          PY
