@@ -1,0 +1,122 @@
+name: Minecraft Bedrock Addons - Download and Google Drive
+
+on:
+  push:
+    paths:
+      - '.github/workflows/minecraft-bedrock-addons-to-drive.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-and-upload:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    env:
+      RCLONE_CONFIG: /tmp/minecraft-bedrock-rclone.conf
+      TARGET: Minecraft Bedrock Addons
+    steps:
+      - name: Download Bedrock addon packages from their original publishers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p addons
+          cd addons
+          curl -fL --retry 3 --connect-timeout 20 --max-time 180 \
+            'https://github.com/th3emilis/village-generator/releases/download/v2.4.0/Village_Generator_2.4.0.mcaddon' \
+            -o 'Village_Generator_2.4.0.mcaddon'
+          curl -fL --retry 3 --connect-timeout 20 --max-time 180 \
+            'https://github.com/shaiku/medieval/releases/download/v6.5.0/medieval_furniture_v6.5.0.mcaddon' \
+            -o 'Medieval_Furniture_Remastered_v6.5.0.mcaddon'
+          # Original v7 has the explicitly documented adjustable 15x16 portcullis.
+          # Use official CurseForge CDN only; no mirrors, scraped content or paywall bypass.
+          try_curseforge() {
+            local id="$1" filename="$2" encoded="$3" folder="${1:0:4}" sub="${1:4:3}"
+            local host url
+            for host in mediafilez.forgecdn.net edge.forgecdn.net; do
+              url="https://${host}/files/${folder}/${sub}/${encoded}"
+              if curl -fLsS --retry 2 --connect-timeout 20 --max-time 120 "$url" -o "$filename" \
+                && python3 -c 'import sys,zipfile;z=zipfile.ZipFile(sys.argv[1]);assert z.testzip() is None;assert any(p.endswith("manifest.json") for p in z.namelist())' "$filename"; then
+                echo "Valid publisher package: $filename"
+                return 0
+              fi
+              rm -f "$filename"
+            done
+            echo "::warning::CurseForge publisher package unavailable: $filename"
+            return 1
+          }
+          try_curseforge 6805864 'Medieval_Furniture_V7_BETA_BP.mcpack' 'Medieval%20Furniture%20V7.0%20BETA%20%5BBP%5D.mcpack' || true
+          try_curseforge 6805867 'Medieval_Furniture_V7_BETA_RP.mcpack' 'Medieval%20Furniture%20V7.0%20BETA%20%5BRP%5D.mcpack' || true
+          # Do not offer an incomplete original v7 pair.
+          if [[ -f Medieval_Furniture_V7_BETA_BP.mcpack && ! -f Medieval_Furniture_V7_BETA_RP.mcpack ]] \
+            || [[ ! -f Medieval_Furniture_V7_BETA_BP.mcpack && -f Medieval_Furniture_V7_BETA_RP.mcpack ]]; then
+            rm -f Medieval_Furniture_V7_BETA_BP.mcpack Medieval_Furniture_V7_BETA_RP.mcpack
+            echo '::warning::Incomplete original v7 set. Falling back to complete v6.5 remaster.'
+          fi
+          python3 - <<'PY'
+          import pathlib,zipfile,hashlib
+          p=pathlib.Path('.')
+          for f in sorted(p.iterdir()):
+              if f.suffix not in ('.mcaddon','.mcpack'): continue
+              with zipfile.ZipFile(f) as z:
+                  bad=z.testzip()
+                  if bad: raise RuntimeError(f'{f}: corrupted entry {bad}')
+              print(f'VERIFIED: {f.name} | {f.stat().st_size:,} bytes | SHA256 {hashlib.sha256(f.read_bytes()).hexdigest()}')
+          PY
+          cat > README-INSTALLATION-DE.txt <<'EOF'
+          MINECRAFT BEDROCK ADDONS - NUR ZUM PRIVATEN GEBRAUCH
+          1) Village_Generator_2.4.0.mcaddon: Dorfbewohner-Haeuser, einzelne Dorfstrukturen, ganze Doerfer.
+             Im Spiel Cheats/Befehle erlauben; /function vg/help; Beispiel: /function vg/snowy/houses/small_house_1
+             Quelle: https://github.com/th3emilis/village-generator
+             Lizenz beachten: keine Weiterverteilung oder Veroeffentlichung.
+          2) Medieval_Furniture_V7_BETA_BP + Medieval_Furniture_V7_BETA_RP:
+             Beide Packs zusammen aktivieren. Original v7 mit anpassbarem Falltor bis 15x16.
+             Quelle: https://www.curseforge.com/minecraft-bedrock/addons/medieval-furniture-add-on
+             Achtung: urspruenglich fuer Bedrock 1.21.80-1.21.94 angegeben.
+          3) Medieval_Furniture_Remastered_v6.5.0.mcaddon:
+             Alternative mit 1800+ Baubloecken, Zaenen, Toren, Daechern und Moebeln.
+             Quelle: https://github.com/shaiku/medieval
+             V7 und v6.5 bitte nicht gleichzeitig in derselben Welt aktivieren.
+          Hinweis: Auf Xbox lassen sich externe .mcaddon-Dateien nicht einfach direkt aus Drive importieren.
+          Ein Import ueber Windows/Android-Welt und Realms kann erforderlich sein.
+          EOF
+      - name: Configure existing private Google Drive OAuth account
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET GOOGLE_REFRESH_TOKEN; do
+            if [ -z "${!v:-}" ]; then echo "::error::Missing OAuth secret $v"; exit 1; fi
+          done
+          if ! command -v rclone >/dev/null; then sudo apt-get update -qq && sudo apt-get install -y -qq rclone; fi
+          response=$(curl -fsS --retry 3 -X POST \
+            --data-urlencode "client_id=$GOOGLE_CLIENT_ID" \
+            --data-urlencode "client_secret=$GOOGLE_CLIENT_SECRET" \
+            --data-urlencode "refresh_token=$GOOGLE_REFRESH_TOKEN" \
+            --data-urlencode 'grant_type=refresh_token' https://oauth2.googleapis.com/token)
+          access_token=$(jq -r '.access_token // empty' <<< "$response")
+          test -n "$access_token" || { echo '::error::Google OAuth refresh failed'; exit 1; }
+          echo "::add-mask::$access_token"
+          expires_in=$(jq -r '.expires_in // 3600' <<< "$response")
+          expiry=$(date -u -d "+${expires_in} seconds" +%Y-%m-%dT%H:%M:%SZ)
+          token=$(jq -cn --arg a "$access_token" --arg r "$GOOGLE_REFRESH_TOKEN" --arg e "$expiry" \
+            '{access_token:$a,token_type:"Bearer",refresh_token:$r,expiry:$e}')
+          rclone config create drive drive client_id "$GOOGLE_CLIENT_ID" \
+            client_secret "$GOOGLE_CLIENT_SECRET" scope drive token "$token" --non-interactive >/dev/null
+          chmod 600 "$RCLONE_CONFIG"
+      - name: Upload and verify Bedrock addons on Drive
+        shell: bash
+        run: |
+          set -euo pipefail
+          rclone mkdir "drive:${TARGET}" --retries 5
+          rclone copy addons "drive:${TARGET}" --progress --transfers 2 --retries 5
+          for f in addons/*; do
+            rclone lsf "drive:${TARGET}/$(basename "$f")" --files-only >/dev/null
+            echo "UPLOAD_CHECK_OK: $(basename "$f")"
+          done
+          rclone lsf "drive:${TARGET}" --files-only
+          echo 'Bedrock addon transfer completed to Google Drive.'
