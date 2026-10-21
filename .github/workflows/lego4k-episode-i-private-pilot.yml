@@ -1,0 +1,88 @@
+name: LEGO 4K - Convert Real Episode I Level for New Engine
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/lego4k-episode-i-private-pilot.yml'
+      - 'scripts/lego_gog_episode_pilot.py'
+permissions:
+  contents: read
+concurrency:
+  group: lego4k-private-episode-i
+  cancel-in-progress: false
+jobs:
+  extract-level:
+    name: Convert purchased GOG Episode I PC level to private glTF package
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    env:
+      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authorize owner's Drive and prepare temporary workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          bash scripts/lego_gog_drive_auth.sh
+          mkdir -p "$RUNNER_TEMP/lego-i/input" "$RUNNER_TEMP/lego-i/output" "$RUNNER_TEMP/lego-i/tools"
+          echo 'GAME_SOURCE_IS_PRIVATE_GOOGLE_DRIVE=yes'
+      - name: Fetch source Episode I on disposable GitHub runner (never on proxy server)
+        shell: bash
+        run: |
+          set -euo pipefail
+          rclone copyto 'drive:EPISODE_I.DAT' "$RUNNER_TEMP/lego-i/input/EPISODE_I.DAT" \
+            --drive-root-folder-id '1V-pB0WqJUp9RBxoLxBkbMzYBSgU492sx' \
+            --retries 3 --low-level-retries 6 --log-level ERROR
+          test "$(stat -c %s "$RUNNER_TEMP/lego-i/input/EPISODE_I.DAT")" -gt 1000000000
+          echo 'PRIVATE_EPISODE_I_ARCHIVE_STAGED_ON_EPHEMERAL_WORKER=yes'
+      - name: Select true non-intro game-level scene and decode glTF
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/stryderjoe/tt-oldera-tools.git "$RUNNER_TEMP/lego-i/tools/tt"
+          python3 -m venv "$RUNNER_TEMP/lego-i/env"
+          "$RUNNER_TEMP/lego-i/env/bin/python" -m pip install -q --disable-pip-version-check 'Pillow>=10,<13'
+          export PYTHONPATH="$RUNNER_TEMP/lego-i/tools/tt/tools"
+          "$RUNNER_TEMP/lego-i/env/bin/python" scripts/lego_gog_episode_pilot.py \
+            --archive "$RUNNER_TEMP/lego-i/input/EPISODE_I.DAT" \
+            --output "$RUNNER_TEMP/lego-i/input/LEVEL_PC.GSC" \
+            --manifest "$RUNNER_TEMP/lego-i/output/source-manifest.json"
+          rm -f -- "$RUNNER_TEMP/lego-i/input/EPISODE_I.DAT"
+          "$RUNNER_TEMP/lego-i/env/bin/python" \
+            "$RUNNER_TEMP/lego-i/tools/tt/tools/nu20.py" export \
+            "$RUNNER_TEMP/lego-i/input/LEVEL_PC.GSC" "$RUNNER_TEMP/lego-i/output" | tail -n 10
+          "$RUNNER_TEMP/lego-i/env/bin/python" \
+            "$RUNNER_TEMP/lego-i/tools/tt/tools/gltf_export.py" \
+            "$RUNNER_TEMP/lego-i/input/LEVEL_PC.GSC" "$RUNNER_TEMP/lego-i/output" | tail -n 10
+          rm -f -- "$RUNNER_TEMP/lego-i/input/LEVEL_PC.GSC"
+          test -s "$RUNNER_TEMP/lego-i/output/gltf/objects.gltf"
+          test -s "$RUNNER_TEMP/lego-i/output/gltf/objects.bin"
+          python3 - <<'PY'
+          from pathlib import Path
+          import json,os
+          root=Path(os.environ["RUNNER_TEMP"])/"lego-i/output"
+          d=json.loads((root/"gltf/objects.gltf").read_text())
+          print("PRIVATE_EPISODE_I_GLTF_MESHES="+str(len(d.get("meshes",[]))))
+          print("PRIVATE_EPISODE_I_GLTF_MATERIALS="+str(len(d.get("materials",[]))))
+          print("PRIVATE_EPISODE_I_GLTF_IMAGES="+str(len(d.get("images",[]))))
+          assert len(d.get("meshes",[]))>0,"No 3D geometry decoded"
+          PY
+      - name: Upload converted private level data directly to Drive (no GitHub artifacts)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export RCLONE_CONFIG="$RUNNER_TEMP/lego-drive-auth/rclone.conf"
+          tar -czf "$RUNNER_TEMP/lego-i-private-scene.tar.gz" \
+            -C "$RUNNER_TEMP/lego-i/output" .
+          test -s "$RUNNER_TEMP/lego-i-private-scene.tar.gz"
+          rclone mkdir 'drive:LEGO Star Wars 4K Edition/03_scene_exports'
+          rclone copyto "$RUNNER_TEMP/lego-i-private-scene.tar.gz" \
+            'drive:LEGO Star Wars 4K Edition/03_scene_exports/episode-i-first-level.tar.gz' \
+            --retries 3 --low-level-retries 6 --log-level ERROR
+          echo 'GOG_EPISODE_I_LEVEL_GLTF_SAVED_TO_PRIVATE_DRIVE=PASS'
+          echo 'NO_COMMERCIAL_GAME_FILES_IN_GITHUB_ARTIFACTS=yes'
+          echo 'NO_SERVER_PROXY_OR_SERVICES_CHANGED=yes'
