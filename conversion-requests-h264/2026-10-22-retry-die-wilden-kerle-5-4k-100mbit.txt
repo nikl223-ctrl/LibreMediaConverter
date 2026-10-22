@@ -1,0 +1,4 @@
+https://drive.google.com/file/d/1XzUmj09hscMNHiuyeEJ7JVwdgUtLuxRr/view?usp=drivesdk
+VIDEO_BITRATE_MBIT=100
+MAX_OUTPUT_BYTES=250000000000
+EXPECTED_GOOGLE_ACCOUNT=videoconverter450@gmail.com
