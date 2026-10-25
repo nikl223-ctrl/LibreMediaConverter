@@ -1,0 +1,7 @@
+GOOGLE_DRIVE_SOURCE_ID=1MBBuUaVvFnetqgSer-Qs4lIAGnfoTR2p
+INPUT=stream-via-drive-api-and-fifo
+OUTPUT=ffmpeg-h264-4k-stream-to-google-drive
+SPLIT=source-to-drive-without-any-local-video-files
+AUDIO=stereo-to-ac3-5.1-640k
+RUNNERS=github-hosted-ubuntu-24.04
+STORAGE=zero-local-video-files
