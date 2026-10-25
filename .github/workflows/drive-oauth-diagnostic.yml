@@ -51,3 +51,25 @@ jobs:
           aud_prefix="${aud%%-*}"
           echo "Access-token audience numeric prefix: $aud_prefix"
           echo "Drive scope present: $(printf '%s' "$scope" | grep -q 'drive' && echo yes || echo no)"
+
+      - name: Identify Drive account used by conversion workflows
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+          token_response=$(curl -fsS --retry 3 --request POST \
+            --data-urlencode "client_id=$GOOGLE_CLIENT_ID" \
+            --data-urlencode "client_secret=$GOOGLE_CLIENT_SECRET" \
+            --data-urlencode "refresh_token=$GOOGLE_REFRESH_TOKEN" \
+            --data-urlencode "grant_type=refresh_token" \
+            https://oauth2.googleapis.com/token)
+          access_token=$(printf '%s' "$token_response" | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
+          echo "::add-mask::$access_token"
+          account=$(curl -fsS -H "Authorization: Bearer $access_token" \
+            "https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)" \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin).get("user",{}).get("emailAddress","UNKNOWN"))')
+          test "$account" != "UNKNOWN" || exit 1
+          echo "Drive account used by conversion workflows: $account"
+          echo "Drive account: $account" >> "$GITHUB_STEP_SUMMARY"
