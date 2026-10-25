@@ -38,73 +38,40 @@ setup() {
 
 prepare() {
   setup
-  free="$(df -Pk "$RUNNER_TEMP" | awk 'NR==2 {printf "%.0f", $4*1024}')"
-  if [ "$free" -lt 9500000000 ]; then
-    sudo rm -rf /usr/share/dotnet /usr/local/lib/android /usr/local/share/powershell /opt/hostedtoolcache/CodeQL || true
-  fi
-  df -h "$RUNNER_TEMP"
   rclone mkdir "drive:$PART_FOLDER/input"
   rclone mkdir "drive:$PART_FOLDER/encoded"
+  # Ensure destination is writable before streaming 7 GB.
   printf 'probe\n' | rclone rcat "drive:$PART_FOLDER/probe.txt" --retries 5
   rclone deletefile "drive:$PART_FOLDER/probe.txt" || true
-
-  mkdir -p "$RUNNER_TEMP/pippi-input" "$RUNNER_TEMP/pippi-parts"
-  rclone backend copyid drive: "$SOURCE_ID" "$RUNNER_TEMP/pippi-input/" \
-    --stats 15s --retries 10 --low-level-retries 30
-  input="$(find "$RUNNER_TEMP/pippi-input" -maxdepth 1 -type f -size +0c | head -1)"
-  test -s "$input"
-  duration="$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$input" | head -1)"
-  segment_seconds="$(python3 -c 'import sys,math; d=float(sys.argv[1]); assert math.isfinite(d) and d>0; print(max(30,d/16))' "$duration")"
-  echo "Input duration $duration seconds, target per segment $segment_seconds seconds"
-  ffmpeg -hide_banner -loglevel warning -stats_period 15 -i "$input" \
-    -map 0:v:0 -map 0:a:0 -c copy -f segment -segment_format matroska \
-    -segment_time "$segment_seconds" -reset_timestamps 1 \
-    "$RUNNER_TEMP/pippi-parts/part_%03d.mkv"
-
-  ids="$(find "$RUNNER_TEMP/pippi-parts" -maxdepth 1 -type f -name 'part_*.mkv' \
-    -printf '%f\n' | sed -E 's/^part_([0-9]+)\.mkv$/\1/' | sort)"
-  count="$(printf '%s\n' "$ids" | wc -l)"
-  test "$count" -ge 2 && test "$count" -le 40 || { echo "::error::Unexpected number of slices: $count"; exit 1; }
-  rclone copy "$RUNNER_TEMP/pippi-parts" "drive:$PART_FOLDER/input" \
-    --transfers 4 --stats 15s --retries 10 --low-level-retries 30
-  ids_json="$(printf '%s\n' "$ids" | jq -R . | jq -sc .)"
-  printf 'parts=%s\n' "$ids_json" >> "$GITHUB_OUTPUT"
-  echo "## Lossless source divided into $count segments, uploaded to Drive" >> "$GITHUB_STEP_SUMMARY"
+  echo "No 7 GB download or source segments will be saved on GitHub runner SSD."
+  export ACCESS_TOKEN="$token" PART_FOLDER
+  python3 scripts/pippi-stream-split.py
 }
-
 encode() {
   setup
   part="$PART_ID"
   test -n "$part"
-  file="$RUNNER_TEMP/part_$part.mkv"
-  rclone copyto "drive:$PART_FOLDER/input/part_$part.mkv" "$file" \
-    --stats 15s --retries 10 --low-level-retries 30
-  test -s "$file"
-  channels="$(ffprobe -v error -select_streams a:0 -show_entries stream=channels -of csv=p=0 "$file" | head -1)"
-  test -n "$channels" && test "$channels" -ge 1
+  remote="drive:$PART_FOLDER/input/part_$part.mkv"
 
-  # First remove blocking and grain, then upscale. Moderate sharpening avoids ringing halos.
+  # Zero source/output video files stored on the runner. The input is streamed from Drive.
+  # The source is stereo per the user; convert to 5.1 with a soundfield-derived AC-3 upmix.
+  # De-block, de-noise BEFORE upscaling to avoid magnifying SD artifacts.
   vf="deblock=filter=strong:block=8:alpha=0.1:beta=0.1,hqdn3d=4:3:6:4.5,scale=3840:2160:force_original_aspect_ratio=decrease:flags=lanczos,pad=3840:2160:(ow-iw)/2:(oh-ih)/2,setsar=1,unsharp=5:5:0.18:3:3:0.0"
-  if [ "$channels" -lt 6 ]; then
-    echo "Upmixing stereo soundfield to AC-3 5.1; source has no discrete surround information."
-    af="aformat=channel_layouts=stereo,surround=chl_out=5.1:level_in=1:level_out=0.8:smooth=0.25,alimiter=limit=0.95"
-  else
-    af="alimiter=limit=0.95"
-  fi
-  # Direct pipeline: encoded bytes go to Google Drive immediately, no local full output.
-  ffmpeg -hide_banner -loglevel warning -stats_period 15 -i "$file" \
-    -map 0:v:0 -map 0:a:0 -vf "$vf" -fps_mode passthrough \
-    -c:v libx264 -preset veryfast -crf 17 -maxrate 45000k -bufsize 90000k \
-    -profile:v high -pix_fmt yuv420p -threads 4 \
-    -af "$af" -c:a ac3 -ac 6 -ar 48000 -b:a 640k \
-    -f matroska pipe:1 \
+  af="aformat=channel_layouts=stereo,surround=chl_out=5.1:level_in=1:level_out=0.8:smooth=0.25,alimiter=limit=0.95"
+  echo "GitHub cloud worker $part: rclone Drive input -> ffmpeg 4K H.264 -> rclone live Drive upload"
+  rclone cat "$remote" --retries 12 --low-level-retries 30 \
+    | ffmpeg -hide_banner -loglevel warning -stats_period 20 -i pipe:0 \
+      -map 0:v:0 -map 0:a:0 -vf "$vf" -fps_mode passthrough \
+      -c:v libx264 -preset veryfast -crf 17 -maxrate 45000k -bufsize 90000k \
+      -profile:v high -pix_fmt yuv420p -threads 4 \
+      -af "$af" -c:a ac3 -ac 6 -ar 48000 -b:a 640k \
+      -f matroska pipe:1 \
     | rclone rcat "drive:$PART_FOLDER/encoded/part_$part.mkv" \
-      --drive-chunk-size 128M --stats 15s --retries 12 --low-level-retries 50
+      --drive-chunk-size 64M --stats 15s --retries 12 --low-level-retries 50
   bytes="$(rclone size "drive:$PART_FOLDER/encoded/part_$part.mkv" --json | jq -r '.bytes // 0')"
   test "$bytes" -gt 1000000
-  echo "Part $part 4K H264/AC3 uploaded: $bytes bytes" >> "$GITHUB_STEP_SUMMARY"
+  echo "Part $part directly streamed to Drive: $bytes bytes" >> "$GITHUB_STEP_SUMMARY"
 }
-
 merge() {
   setup
   ids="$(printf '%s' "$PARTS_JSON" | jq -r '.[]')"
