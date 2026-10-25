@@ -1,0 +1,67 @@
+name: Pippi Langstrumpf - 4K H264 Restauration / Samsung 5.1
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'conversion-requests-pippi-4k/*.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pippi-4k-restoration-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Source losslessly split and staged in Google Drive
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    outputs:
+      parts: ${{ steps.prep.outputs.parts }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download source once, split without re-encoding, upload slices to Drive
+        id: prep
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        run: bash scripts/pippi-h264-restore.sh prepare
+
+  encode:
+    name: 'GitHub-hosted worker ${{ matrix.part }} / live Drive upload'
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        part: ${{ fromJson(needs.prepare.outputs.parts) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore blocking and noise, upscale H264 4K, audio upmix AC3 5.1, stream to Drive
+        env:
+          PART_ID: ${{ matrix.part }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        run: bash scripts/pippi-h264-restore.sh encode
+
+  combine:
+    name: Join segments and save full MKV directly to Drive
+    needs: [prepare, encode]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble from Drive using FIFO streaming, check upload, delete temporary parts
+        env:
+          PARTS_JSON: ${{ needs.prepare.outputs.parts }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        run: bash scripts/pippi-h264-restore.sh merge
