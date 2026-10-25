@@ -1,0 +1,6 @@
+https://drive.google.com/file/d/1MBBuUaVvFnetqgSer-Qs4lIAGnfoTR2p/view?usp=drivesdk
+VIDEO=H264_3840x2160_CRF17
+RESTORE=deblock_hqdn3d_upscale
+AUDIO=AC3_5.1_640k
+UPLOAD=stream_segments_and_final_to_google_drive
+RUNNER=github_hosted_ubuntu_24.04
