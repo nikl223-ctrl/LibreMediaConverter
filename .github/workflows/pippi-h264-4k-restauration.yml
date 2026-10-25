@@ -12,18 +12,18 @@ permissions:
 
 concurrency:
   group: pippi-4k-restoration-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   prepare:
-    name: Source losslessly split and staged in Google Drive
+    name: Source streamed to Drive lossless slices; no local video storage
     runs-on: ubuntu-24.04
     timeout-minutes: 350
     outputs:
       parts: ${{ steps.prep.outputs.parts }}
     steps:
       - uses: actions/checkout@v4
-      - name: Download source once, split without re-encoding, upload slices to Drive
+      - name: Stream original source and split directly into Drive through FIFOs
         id: prep
         env:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
@@ -43,7 +43,7 @@ jobs:
         part: ${{ fromJson(needs.prepare.outputs.parts) }}
     steps:
       - uses: actions/checkout@v4
-      - name: Restore blocking and noise, upscale H264 4K, audio upmix AC3 5.1, stream to Drive
+      - name: Stream source from Drive, deblock and denoise, H264 4K and AC3 5.1 live to Drive
         env:
           PART_ID: ${{ matrix.part }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
