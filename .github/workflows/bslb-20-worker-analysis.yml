@@ -1,0 +1,43 @@
+name: BSLB 20-worker diagnostics
+on:
+  workflow_dispatch:
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]
+    steps:
+      - name: Download original from Google Drive
+        env:
+          DRIVE_ID: 1Y5Ey_9XQ7ufVx_63pGGPA7VU4D1BXuyw
+        run: |
+          python -m pip install --quiet gdown pillow
+          gdown --id "$DRIVE_ID" -O original.mcpack
+          unzip -t original.mcpack | tail -1
+      - name: Inspect assigned textures without modifying copyrighted source
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          python - <<'PY'
+          import zipfile,hashlib,os,json,io,collections
+          from PIL import Image
+          shard=int(os.environ['SHARD'])
+          report={'shard':shard,'files':[],'errors':[]}
+          with zipfile.ZipFile('original.mcpack') as z:
+              for item in z.infolist():
+                  if int(hashlib.sha256(item.filename.encode()).hexdigest(),16)%20 != shard: continue
+                  if not item.filename.lower().endswith(('.png','.tga')): continue
+                  try:
+                      with Image.open(io.BytesIO(z.read(item))) as im:
+                          report['files'].append({'path':item.filename,'width':im.width,'height':im.height,'bytes':item.file_size,'mode':im.mode,'estimated_rgba_vram_bytes':im.width*im.height*4})
+                  except Exception as e:report['errors'].append({'path':item.filename,'error':str(e)})
+          with open('report.json','w') as f:json.dump(report,f,indent=2)
+          print('Inspected',len(report['files']),'textures; errors',len(report['errors']))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bslb-analysis-${{ matrix.shard }}
+          path: report.json
+          retention-days: 7
