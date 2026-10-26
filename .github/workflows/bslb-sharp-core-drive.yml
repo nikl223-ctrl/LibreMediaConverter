@@ -56,8 +56,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends rclone jq ca-certificates curl
+          # Ubuntu hosted runners generally include curl and jq; avoid apt locks.
+          command -v jq >/dev/null || { echo "::error::jq missing on runner"; exit 1; }
+          command -v curl >/dev/null || { echo "::error::curl missing on runner"; exit 1; }
+          if ! command -v rclone >/dev/null; then
+            curl -fsSL --retry 3 --connect-timeout 15 --max-time 90 https://downloads.rclone.org/rclone-current-linux-amd64.zip -o /tmp/rclone.zip
+            python3 - <<'PY'
+          import os,zipfile
+          with zipfile.ZipFile('/tmp/rclone.zip') as z:
+              exe=next(n for n in z.namelist() if n.endswith('/rclone'))
+              with open('/tmp/rclone','wb') as out:
+                  out.write(z.read(exe))
+          os.chmod('/tmp/rclone',0o755)
+          PY
+            echo /tmp >> "$GITHUB_PATH"
+          fi
+          rclone version | head -n 1
           rclone version | head -n 1
 
       - name: Configure existing Google Drive OAuth secrets
