@@ -1,0 +1,134 @@
+name: BSLB Xbox Sharp Core PBR - Cloud Safe to Drive
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/bslb-sharp-core-drive.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: bslb-sharp-core-drive
+  cancel-in-progress: false
+
+jobs:
+  render-and-drive-upload:
+    name: Build sharp core textures and upload to Google Drive
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      RCLONE_CONFIG: /tmp/bslb-rclone.conf
+      DEST_FOLDER: "Video Converter/Fertig"
+      PACK_FILE: "BSLB-Xbox-Sharp-Core-PBR-Vanilla-Wolken.mcpack"
+    steps:
+      - name: Checkout BSLB rendering scripts
+        uses: actions/checkout@v4
+
+      - name: Download original texture pack from Google Drive
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet gdown pillow numpy
+          mkdir -p source
+          gdown 1Y5Ey_9XQ7ufVx_63pGGPA7VU4D1BXuyw -O source/original.mcpack
+          test -s source/original.mcpack
+
+      - name: Render improved PBR core textures into directly active pack root
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/bslb_sharp_core.py source/original.mcpack "dist/$PACK_FILE"
+          python3 - <<'PY'
+          import os, zipfile
+          path = "dist/" + os.environ["PACK_FILE"]
+          with zipfile.ZipFile(path) as package:
+              assert package.testzip() is None, "Corrupt resource pack"
+              assert "manifest.json" in package.namelist(), "Missing Minecraft manifest"
+              assert package.read("manifest.json"), "Empty Minecraft manifest"
+              print(f"PACK_RENDERED_OK: {path} ({os.path.getsize(path)} bytes)")
+          PY
+
+      - name: Install rclone and jq
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends rclone jq ca-certificates curl
+          rclone version | head -n 1
+
+      - name: Configure existing Google Drive OAuth secrets
+        shell: bash
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+          for key in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET GOOGLE_REFRESH_TOKEN; do
+            if [ -z "${!key:-}" ]; then
+              echo "::error::Missing GitHub secret: $key"
+              exit 1
+            fi
+          done
+          response=$(curl -fsS --retry 3 --request POST \
+            --data-urlencode "client_id=$GOOGLE_CLIENT_ID" \
+            --data-urlencode "client_secret=$GOOGLE_CLIENT_SECRET" \
+            --data-urlencode "refresh_token=$GOOGLE_REFRESH_TOKEN" \
+            --data-urlencode "grant_type=refresh_token" \
+            https://oauth2.googleapis.com/token)
+          access_token=$(jq -r '.access_token // empty' <<< "$response")
+          if [ -z "$access_token" ]; then
+            echo "::error::Google OAuth token refresh failed."
+            exit 1
+          fi
+          echo "::add-mask::$access_token"
+          expires_in=$(jq -r '.expires_in // 3600' <<< "$response")
+          expiry=$(date -u -d "+${expires_in} seconds" +%Y-%m-%dT%H:%M:%SZ)
+          token=$(jq -cn --arg a "$access_token" --arg r "$GOOGLE_REFRESH_TOKEN" --arg e "$expiry" \
+            '{access_token:$a,token_type:"Bearer",refresh_token:$r,expiry:$e}')
+          rclone config create drive drive client_id "$GOOGLE_CLIENT_ID" \
+            client_secret "$GOOGLE_CLIENT_SECRET" scope drive token "$token" \
+            --non-interactive >/dev/null
+          chmod 600 "$RCLONE_CONFIG"
+          rclone lsf drive: --max-depth 1 >/dev/null
+          echo "DRIVE_LOGIN_OK"
+
+      - name: Upload the rendered pack and verify Drive file size
+        shell: bash
+        run: |
+          set -euo pipefail
+          local_file="dist/$PACK_FILE"
+          remote_file="drive:$DEST_FOLDER/$PACK_FILE"
+          test -s "$local_file"
+          rclone mkdir "drive:$DEST_FOLDER" --retries 5 --low-level-retries 15
+          rclone copyto "$local_file" "$remote_file" \
+            --retries 6 --low-level-retries 20 \
+            --stats 10s --stats-one-line
+          local_bytes=$(stat -c '%s' "$local_file")
+          remote_bytes=$(rclone size --json "$remote_file" | jq -r '.bytes // 0')
+          if [ "$remote_bytes" -ne "$local_bytes" ] || [ "$remote_bytes" -le 0 ]; then
+            echo "::error::Drive verification failed: local=$local_bytes remote=$remote_bytes"
+            exit 1
+          fi
+          echo "GOOGLE_DRIVE_UPLOAD_VERIFIED: $DEST_FOLDER/$PACK_FILE ($remote_bytes bytes)"
+          {
+            echo "## BSLB 4K Vanilla Clouds uploaded successfully"
+            echo
+            echo "- Google Drive: \`Meine Ablage/$DEST_FOLDER/$PACK_FILE\`"
+            echo "- Size verified: $remote_bytes bytes"
+            echo "- Render input: successful 4K test pack (run 40295598745)"
+            echo "- Normal Minecraft clouds restored."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Retain GitHub artifact as backup
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BSLB-Xbox-Sharp-Core-PBR
+          path: dist/*.mcpack
+          if-no-files-found: warn
+          retention-days: 7
