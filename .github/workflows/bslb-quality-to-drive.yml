@@ -1,0 +1,171 @@
+name: BSLB Xbox Quality Textures - 20 Workers to Google Drive
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/bslb-quality-to-drive.yml'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: bslb-4k-quality-drive
+  cancel-in-progress: false
+jobs:
+  source:
+    name: Download and validate original BSLB pack
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download original source once
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet gdown
+          gdown 1Y5Ey_9XQ7ufVx_63pGGPA7VU4D1BXuyw -O original.mcpack
+          python3 - <<'PY'
+          import zipfile
+          with zipfile.ZipFile('original.mcpack') as z:
+              assert z.testzip() is None
+              assert 'manifest.json' in z.namelist()
+              print(f'Original has {len(z.namelist())} files')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bslb-original-private-build-input
+          path: original.mcpack
+          retention-days: 1
+  render:
+    name: Texture upscale worker ${{ matrix.shard }}
+    needs: source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install image processor
+        run: python3 -m pip install --quiet pillow
+      - uses: actions/download-artifact@v4
+        with:
+          name: bslb-original-private-build-input
+          path: source
+      - name: Upscale block albedo heightmaps normal maps PBR
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/bslb_quality_renderer.py shard --source source/original.mcpack --output overlay --index ${{ matrix.shard }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bslb-quality-worker-${{ matrix.shard }}
+          path: overlay/
+          if-no-files-found: error
+          retention-days: 1
+  package-drive:
+    name: Assemble Xbox pack and upload directly to Google Drive
+    needs: [source, render]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    env:
+      RCLONE_CONFIG: /tmp/bslb-quality-rclone.conf
+      DEST_FOLDER: 'Video Converter/Fertig'
+      PACK_FILE: 'BSLB-Xbox-4K-Qualitaet-Vanilla-Wolken.mcpack'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet pillow
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends rclone jq ca-certificates curl
+      - uses: actions/download-artifact@v4
+        with:
+          name: bslb-original-private-build-input
+          path: source
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bslb-quality-worker-*
+          path: overlay
+          merge-multiple: true
+      - name: Assemble and validate enhanced pack with vanilla clouds
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/bslb_quality_renderer.py assemble --source source/original.mcpack --overlay overlay --output "dist/$PACK_FILE"
+          test -s "dist/$PACK_FILE"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          p=Path('dist')/os.environ['PACK_FILE']
+          r=json.loads(p.with_suffix('.report.json').read_text())
+          print('UPSCALING_REPORT',json.dumps(r,sort_keys=True))
+          assert r['upscaled']>=3000
+          assert r['removed_static_sky_files']>=10
+          assert p.stat().st_size>=20000000,'Texture pack unexpectedly small'
+          PY
+      - name: Configure existing private Google Drive OAuth account
+        shell: bash
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+          for key in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET GOOGLE_REFRESH_TOKEN; do
+            if [ -z "${!key:-}" ]; then echo "::error::Missing OAuth secret $key"; exit 1; fi
+          done
+          response=$(curl -fsS --retry 3 -X POST \
+            --data-urlencode "client_id=$GOOGLE_CLIENT_ID" \
+            --data-urlencode "client_secret=$GOOGLE_CLIENT_SECRET" \
+            --data-urlencode "refresh_token=$GOOGLE_REFRESH_TOKEN" \
+            --data-urlencode 'grant_type=refresh_token' https://oauth2.googleapis.com/token)
+          access_token=$(jq -r '.access_token // empty' <<< "$response")
+          test -n "$access_token" || { echo '::error::Google OAuth refresh failed'; exit 1; }
+          echo "::add-mask::$access_token"
+          expires_in=$(jq -r '.expires_in // 3600' <<< "$response")
+          expiry=$(date -u -d "+${expires_in} seconds" +%Y-%m-%dT%H:%M:%SZ)
+          token=$(jq -cn --arg a "$access_token" --arg r "$GOOGLE_REFRESH_TOKEN" --arg e "$expiry" \
+            '{access_token:$a,token_type:"Bearer",refresh_token:$r,expiry:$e}')
+          rclone config create drive drive client_id "$GOOGLE_CLIENT_ID" \
+            client_secret "$GOOGLE_CLIENT_SECRET" scope drive token "$token" --non-interactive >/dev/null
+          chmod 600 "$RCLONE_CONFIG"
+          rclone lsf drive: --max-depth 1 >/dev/null
+          echo "DRIVE_LOGIN_OK"
+      - name: Upload enhanced Minecraft resource pack and verify bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          local_file="dist/$PACK_FILE"
+          remote_file="drive:$DEST_FOLDER/$PACK_FILE"
+          rclone mkdir "drive:$DEST_FOLDER" --retries 5
+          rclone copyto "$local_file" "$remote_file" --transfers 1 --drive-chunk-size 32M --retries 8 --low-level-retries 30 --stats 10s --stats-one-line
+          local_bytes=$(stat -c '%s' "$local_file")
+          remote_bytes=$(rclone size --json "$remote_file" | jq -r '.bytes // 0')
+          if [ "$local_bytes" -ne "$remote_bytes" ] || [ "$remote_bytes" -le 0 ]; then
+            echo "::error::File-size mismatch: local=$local_bytes remote=$remote_bytes"
+            exit 1
+          fi
+          echo "GOOGLE_DRIVE_UPLOAD_VERIFIED: $DEST_FOLDER/$PACK_FILE ($remote_bytes bytes)"
+          {
+            echo "## BSLB improved Xbox resource pack"
+            echo
+            echo "- Drive destination: Meine Ablage/$DEST_FOLDER/$PACK_FILE"
+            echo "- Verified file size: $remote_bytes bytes"
+            echo "- Rendered block PBR textures in 20 GitHub workers"
+            echo "- Vanilla Minecraft clouds retained; static sky overrides removed"
+            echo "- Source artwork was upscaled, not recreated as true native 4K art"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Save backup pack and rendering report as GitHub artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BSLB-Xbox-4K-Quality-Drive-Backup
+          path: |
+            dist/*.mcpack
+            dist/*.report.json
+          if-no-files-found: warn
+          retention-days: 7
