@@ -1,0 +1,27 @@
+name: BSLB 4K Vanilla Clouds
+on:
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: read
+jobs:
+  clouds:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download previous 4K test artifact
+        uses: actions/download-artifact@v4
+        with:
+          run-id: 40295598745
+          github-token: ${{ github.token }}
+          name: BSLB-Xbox-Test-Packs
+          path: source
+      - name: Build vanilla-cloud version
+        run: |
+          ls -lh source
+          python scripts/bslb_vanilla_clouds.py source/BSLB-Xbox-4K-Test.mcpack dist/BSLB-Xbox-4K-Vanilla-Wolken.mcpack
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BSLB-Xbox-4K-Vanilla-Wolken
+          path: dist/*.mcpack
+          retention-days: 7
