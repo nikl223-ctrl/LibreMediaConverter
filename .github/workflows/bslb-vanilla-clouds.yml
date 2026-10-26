@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      RCLONE_CONFIG: ${{ runner.temp }}/bslb-rclone.conf
+      RCLONE_CONFIG: /tmp/bslb-rclone.conf
       DEST_FOLDER: "Video Converter/Fertig"
       PACK_FILE: "BSLB-Xbox-4K-Vanilla-Wolken.mcpack"
     steps:
@@ -110,7 +110,7 @@ jobs:
             --retries 6 --low-level-retries 20 \
             --stats 10s --stats-one-line
           local_bytes=$(stat -c '%s' "$local_file")
-          remote_bytes=$(rclone lsjson "$remote_file" | jq -r '.Size // 0')
+          remote_bytes=$(rclone size --json "$remote_file" | jq -r '.bytes // 0')
           if [ "$remote_bytes" -ne "$local_bytes" ] || [ "$remote_bytes" -le 0 ]; then
             echo "::error::Drive verification failed: local=$local_bytes remote=$remote_bytes"
             exit 1
