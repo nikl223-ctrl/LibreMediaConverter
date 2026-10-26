@@ -71,7 +71,7 @@ jobs:
           PY
             echo /tmp >> "$GITHUB_PATH"
           fi
-          rclone version | head -n 1
+          if [ -x /tmp/rclone ]; then /tmp/rclone version | head -n 1; else rclone version | head -n 1; fi
           rclone version | head -n 1
 
       - name: Configure existing Google Drive OAuth secrets
