@@ -1,0 +1,84 @@
+name: DVD ISO to 4K HEVC 500M - 20 Workers + Cloud Merge
+
+on:
+  workflow_dispatch:
+    inputs:
+      iso_file_id:
+        description: "Google Drive file ID of the DVD ISO (not a URL)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dvd-iso-4k500
+  cancel-in-progress: false
+
+env:
+  RCLONE_CONFIG: "${{ runner.temp }}/rclone.conf"
+  GOOGLE_CLIENT_ID: "${{ secrets.GOOGLE_CLIENT_ID }}"
+  GOOGLE_CLIENT_SECRET: "${{ secrets.GOOGLE_CLIENT_SECRET }}"
+  GOOGLE_REFRESH_TOKEN: "${{ secrets.GOOGLE_REFRESH_TOKEN }}"
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    outputs:
+      segments: "${{ steps.prepare.outputs.segments }}"
+      duration_us: "${{ steps.prepare.outputs.duration_us }}"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install streaming DVD tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg jq curl ca-certificates rclone fuse3 fuseiso
+          rclone version
+          ffmpeg -version | head -n 1
+      - name: Read ISO and prepare source directly on Drive
+        id: prepare
+        env:
+          ISO_FILE_ID: "${{ inputs.iso_file_id }}"
+        run: bash scripts/dvd-iso-4k500.sh prepare
+
+  encode:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        worker: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install encoding tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg jq curl ca-certificates rclone fuse3
+      - name: Encode assigned one-minute clips and stream each to Google Drive
+        env:
+          WORKER: "${{ matrix.worker }}"
+          SEGMENTS: "${{ needs.prepare.outputs.segments }}"
+          DURATION_US: "${{ needs.prepare.outputs.duration_us }}"
+        run: bash scripts/dvd-iso-4k500.sh encode
+
+  merge:
+    needs: [prepare, encode]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install merging tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg jq curl ca-certificates rclone fuse3
+      - name: Verify all parts and stream-merge the final movie to Drive
+        env:
+          SEGMENTS: "${{ needs.prepare.outputs.segments }}"
+          DURATION_US: "${{ needs.prepare.outputs.duration_us }}"
+        run: bash scripts/dvd-iso-4k500.sh merge
