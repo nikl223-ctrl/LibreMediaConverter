@@ -38,7 +38,10 @@ auth_drive() {
 mount_remote() {
   local remote="$1" target="$2"
   mkdir -p "$target"
-  rclone mount "$remote" "$target" --read-only --vfs-cache-mode off \
+  # Ubuntu 24.04 hosted runners may deny unprivileged FUSE mounts.
+  # Mount with root and allow read-only access by the runner user.
+  sudo env RCLONE_CONFIG="$RCLONE_CONFIG" PATH="/usr/bin:/bin:/usr/local/bin" \
+    rclone mount "$remote" "$target" --read-only --allow-other --vfs-cache-mode off \
     --vfs-read-chunk-size 16M --vfs-read-chunk-size-limit 128M \
     --daemon --daemon-wait 45s
   mountpoint -q "$target"
@@ -73,7 +76,7 @@ prepare() {
   [[ -r "$iso_path" ]] || { echo "::error::ISO cannot be opened through Drive FUSE"; exit 1; }
   dvd_path="$RUNNER_TEMP/dvd-video"
   mkdir -p "$dvd_path"
-  fuseiso "$iso_path" "$dvd_path"
+  sudo fuseiso -o allow_other "$iso_path" "$dvd_path"
   mountpoint -q "$dvd_path" || { echo "::error::fuseiso mount failed"; exit 1; }
   local vob_dir
   vob_dir=$(find "$dvd_path" -maxdepth 2 -type d -iname VIDEO_TS -print -quit)
