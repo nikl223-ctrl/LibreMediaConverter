@@ -6,7 +6,12 @@ on:
       iso_file_id:
         description: "Google Drive file ID of the DVD ISO (not a URL)"
         required: true
+        default: "1w43h91LIxm5_e8uuArI3D1XthrgXRbLK"
         type: string
+  push:
+    branches: [main]
+    paths:
+      - "conversion-requests-dvd-4k500/*.txt"
 
 permissions:
   contents: read
@@ -40,7 +45,7 @@ jobs:
       - name: Read ISO and prepare source directly on Drive
         id: prepare
         env:
-          ISO_FILE_ID: "${{ inputs.iso_file_id }}"
+          ISO_FILE_ID: "${{ inputs.iso_file_id || '1w43h91LIxm5_e8uuArI3D1XthrgXRbLK' }}"
         run: bash scripts/dvd-iso-4k500.sh prepare
 
   encode:
