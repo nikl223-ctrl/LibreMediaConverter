@@ -1,0 +1,3 @@
+Source Google Drive ISO ID: 1w43h91LIxm5_e8uuArI3D1XthrgXRbLK
+Output: 4K HEVC 500M, 20 one-minute workers, stream to Google Drive.
+Requested 2026-11-18.
